@@ -1,6 +1,5 @@
 """
-ANALIZADOR SEMÁNTICO PF2024 - VERSIÓN COMPLETA
-Incluye análisis semántico con detección de errores detallada
+ANALIZADOR SEMÁNTICO
 """
 
 import ply.lex as lex
@@ -75,6 +74,9 @@ t_ignore = ' \t'
 lineas_codigo = []  # Para mostrar contexto de errores
 tabla_tipos = {}  # Para almacenar tipos de variables
 
+# Contador global de temporales para cuádruplos
+temp_counter = 0
+
 # ================= CLASES PARA ANÁLISIS SEMÁNTICO =================
 
 class ErrorSemantico:
@@ -93,6 +95,7 @@ class Variable:
         self.inicializada = inicializada
         self.usada = False
         self.lineas_uso = []
+        self.valor = None  # almacena el valor actual de la variable
 
 class AnalizadorSemantico:
     def __init__(self):
@@ -243,7 +246,7 @@ def agregar_simbolo(lexema, token, referencia=None):
     return nuevo_simbolo
 
 def reiniciar_datos():
-    global errores, errores_semanticos, tabla_simbolos, contador_simbolos, arboles_operaciones, lineas_codigo, tabla_tipos
+    global errores, errores_semanticos, tabla_simbolos, contador_simbolos, arboles_operaciones, lineas_codigo, tabla_tipos, temp_counter
     errores = []
     errores_semanticos = []
     tabla_simbolos = []
@@ -251,6 +254,7 @@ def reiniciar_datos():
     arboles_operaciones = []
     lineas_codigo = []
     tabla_tipos = {}
+    temp_counter = 0
     analizador_sem.reiniciar()
 
 def obtener_linea_actual(p):
@@ -440,6 +444,7 @@ def p_instruccion(p):
                   | llamada_funcion'''
     pass
 
+# Reemplazamos p_asignacion para generar cuádruplos y evaluar
 def p_asignacion(p):
     '''asignacion : ID ASIG expresion PC'''
     linea = obtener_linea_actual(p)
@@ -455,12 +460,32 @@ def p_asignacion(p):
     
     analizador_sem.asignar_variable(p[1], tipo_expresion, linea)
     
-    # Guardar la operación aritmética
+    # Guardar la operación aritmética, evaluar si es posible y generar cuádruplos
     if p[3] and hasattr(p[3], 'tipo') and p[3].tipo in ['operacion', 'termino', 'ID']:
+        # Evaluar la expresión (si es posible)
+        valor, tipo_eval = evaluar_nodo(p[3])
+        # si la variable existe, actualizamos su valor (si la evaluación fue posible)
+        var = analizador_sem.variables.get(p[1])
+        if valor is not None and var is not None:
+            var.valor = valor
+            var.inicializada = True
+
+        # Generar cuádruplos desde el AST
+        resultado_operando, quads = generar_cuadruplos_desde_nodo(p[3], [])
+
+        # Generar cuádruplo final de asignación al destino
+        asign_dest = p[1]
+        if resultado_operando is not None:
+            quads.append((':=', resultado_operando, None, asign_dest))
+
+        # añadir la info al registro de operaciones (incluye resultado, que puede ser None)
         arboles_operaciones.append({
             'variable': p[1],
             'expresion': p[3],
-            'linea': linea
+            'linea': linea,
+            'resultado': valor,
+            'tipo_resultado': tipo_eval,
+            'cuadruplos': quads
         })
 
 def p_expresion_binaria(p):
@@ -678,7 +703,7 @@ parser = yacc.yacc()
 
 # ================= FUNCIONES PARA ÁRBOLES =================
 def expresion_a_texto(nodo, precedencia_padre=0):
-    """Convierte un nodo del árbol a texto"""
+    """Convierte un nodo del árbol a texto (infija)"""
     if nodo is None:
         return ""
     
@@ -727,20 +752,265 @@ def imprimir_arbol_operacion(nodo, nivel=0):
     
     return resultado
 
+# --- Nuevas utilidades: prefija, postfija, evaluación y cuádruplos ---
+
+def nodo_a_postfijo(nodo):
+    """Convierte un NodoOperacion a notación postfija (RPN)."""
+    if nodo is None:
+        return ""
+    if nodo.tipo == 'operacion':
+        # operador unario
+        if nodo.izquierdo is None:
+            return f"{nodo_a_postfijo(nodo.derecho)} {nodo.valor}".strip()
+        # binario
+        left = nodo_a_postfijo(nodo.izquierdo)
+        right = nodo_a_postfijo(nodo.derecho)
+        return f"{left} {right} {nodo.valor}".strip()
+    elif nodo.tipo in ('termino', 'ID'):
+        return str(nodo.valor)
+    else:
+        return str(nodo.valor)
+
+def nodo_a_prefijo(nodo):
+    """Convierte un NodoOperacion a notación prefija."""
+    if nodo is None:
+        return ""
+    if nodo.tipo == 'operacion':
+        # operador unario
+        if nodo.izquierdo is None:
+            return f"{nodo.valor} {nodo_a_prefijo(nodo.derecho)}".strip()
+        # binario
+        left = nodo_a_prefijo(nodo.izquierdo)
+        right = nodo_a_prefijo(nodo.derecho)
+        return f"{nodo.valor} {left} {right}".strip()
+    elif nodo.tipo in ('termino', 'ID'):
+        return str(nodo.valor)
+    else:
+        return str(nodo.valor)
+
+def evaluar_nodo(nodo):
+    """
+    Evalúa recursivamente un NodoOperacion.
+    Devuelve (valor, tipo) o (None, None) si no pudo evaluarse (y agrega errores semánticos).
+    """
+    if nodo is None:
+        return None, None
+
+    # Constante entera
+    if nodo.tipo == 'termino':
+        try:
+            v = int(nodo.valor)
+            return v, 'Int'
+        except Exception:
+            return None, None
+
+    # Identificador -> buscar variable
+    if nodo.tipo == 'ID':
+        nombre = nodo.valor
+        var = analizador_sem.variables.get(nombre)
+        if var is None:
+            # variable no declarada (ya manejado antes, pero robustecemos)
+            error = ErrorSemantico(
+                linea=nodo.linea,
+                tipo="VARIABLE_NO_DECLARADA",
+                descripcion=f"La variable '{nombre}' no ha sido declarada",
+                contexto=f"Uso en expresión",
+                sugerencia=f"Declare la variable '{nombre}' antes de usarla"
+            )
+            errores_semanticos.append(error)
+            return None, None
+        if not var.inicializada:
+            error = ErrorSemantico(
+                linea=nodo.linea,
+                tipo="VARIABLE_NO_INICIALIZADA",
+                descripcion=f"La variable '{nombre}' se usa sin inicializar",
+                contexto=f"Uso en expresión",
+                sugerencia=f"Asigne un valor a '{nombre}' antes de usarla"
+            )
+            errores_semanticos.append(error)
+            return None, None
+        return var.valor, var.tipo
+
+    # Operación (unaria o binaria)
+    if nodo.tipo == 'operacion':
+        op = nodo.valor
+        # Unario
+        if nodo.izquierdo is None:
+            # evaluar derecho
+            rv, rt = evaluar_nodo(nodo.derecho)
+            if rv is None:
+                return None, None
+            if rt != 'Int':
+                error = ErrorSemantico(
+                    linea=nodo.linea,
+                    tipo="OPERACION_TIPO_INVALIDO",
+                    descripcion=f"Operador unario '{op}' no válido para tipo '{rt}'",
+                    contexto=f"Operación unaria en línea {nodo.linea}",
+                    sugerencia="Use operandos numéricos para operaciones aritméticas"
+                )
+                errores_semanticos.append(error)
+                return None, None
+            if op == '-':
+                return -rv, 'Int'
+            # Otros unarios si se añaden
+            return None, None
+
+        # Binario
+        lv, lt = evaluar_nodo(nodo.izquierdo)
+        rv, rt = evaluar_nodo(nodo.derecho)
+        if lv is None or rv is None:
+            return None, None
+
+        # actualmente sólo Ints para aritmética
+        if lt != 'Int' or rt != 'Int':
+            error = ErrorSemantico(
+                linea=nodo.linea,
+                tipo="OPERACION_TIPO_INVALIDO",
+                descripcion=f"Operación '{op}' no válida para tipos '{lt}' y '{rt}'",
+                contexto=f"Operación binaria en línea {nodo.linea}",
+                sugerencia="Use operandos de tipo 'Int' en operaciones aritméticas"
+            )
+            errores_semanticos.append(error)
+            return None, None
+
+        try:
+            if op == '+':
+                return lv + rv, 'Int'
+            elif op == '-':
+                return lv - rv, 'Int'
+            elif op == '*':
+                return lv * rv, 'Int'
+            elif op == '/':
+                if rv == 0:
+                    error = ErrorSemantico(
+                        linea=nodo.linea,
+                        tipo="DIVISION_POR_CERO",
+                        descripcion="División por cero detectada en tiempo de evaluación",
+                        contexto=f"División en línea {nodo.linea}",
+                        sugerencia="Asegúrese de que el divisor no sea cero"
+                    )
+                    errores_semanticos.append(error)
+                    return None, None
+                return lv // rv, 'Int'  # división entera; cambia si deseas float
+            else:
+                return None, None
+        except Exception as e:
+            error = ErrorSemantico(
+                linea=nodo.linea,
+                tipo="ERROR_EVALUACION",
+                descripcion=f"Error al evaluar operación: {e}",
+                contexto=f"Operación en línea {nodo.linea}",
+                sugerencia="Revise los operandos"
+            )
+            errores_semanticos.append(error)
+            return None, None
+
+    # por defecto
+    return None, None
+
+# --- Generación de cuádruplos (cuadruples) ---
+
+def nuevo_temp():
+    """Devuelve nombre temporal nuevo tipo t1, t2, ..."""
+    global temp_counter
+    temp_counter += 1
+    return f"t{temp_counter}"
+
+def generar_cuadruplos_desde_nodo(nodo, quads=None):
+    """
+    Recorre el AST y genera cuádruplos en formato (operador, arg1, arg2, resultado).
+    Devuelve (nombre_operando_resultante, lista_de_cuadruplos).
+    """
+    if quads is None:
+        quads = []
+
+    if nodo is None:
+        return None, quads
+
+    # término (constante entera)
+    if nodo.tipo == 'termino':
+        return nodo.valor, quads
+
+    # identificador -> usar su nombre como operando
+    if nodo.tipo == 'ID':
+        return nodo.valor, quads
+
+    # operación unaria
+    if nodo.tipo == 'operacion' and nodo.izquierdo is None:
+        op = nodo.valor
+        operando_d, quads = generar_cuadruplos_desde_nodo(nodo.derecho, quads)
+        t = nuevo_temp()
+        quads.append((op, operando_d, None, t))
+        return t, quads
+
+    # operación binaria
+    if nodo.tipo == 'operacion':
+        op = nodo.valor
+        left_operand, quads = generar_cuadruplos_desde_nodo(nodo.izquierdo, quads)
+        right_operand, quads = generar_cuadruplos_desde_nodo(nodo.derecho, quads)
+        t = nuevo_temp()
+        quads.append((op, left_operand, right_operand, t))
+        return t, quads
+
+    # por defecto
+    return None, quads
+
 def generar_arboles_texto():
-    """Genera el texto completo de todos los árboles de operaciones"""
+    """Genera el texto completo de todos los árboles de operaciones
+       e incluye notaciones: infija, postfija (RPN) y prefija."""
     if not arboles_operaciones:
         return "No se encontraron operaciones aritméticas en el código."
     
     resultado = ""
     for i, operacion in enumerate(arboles_operaciones, 1):
-        expresion_texto = expresion_a_texto(operacion['expresion'])
+        nodo = operacion['expresion']
+        expresion_texto = expresion_a_texto(nodo)  # infija (con paréntesis si aplica)
+        postfix = nodo_a_postfijo(nodo)
+        prefix = nodo_a_prefijo(nodo)
         resultado += f"=== Operación {i}: {operacion['variable']} := {expresion_texto} ===\n"
-        resultado += f"Línea: {operacion.get('linea', 'N/A')}\n"
+        resultado += f"Línea: {operacion.get('linea', 'N/A')}\n\n"
+        resultado += f"Notación infija:   {expresion_texto}\n"
+        resultado += f"Notación postfija: {postfix}\n"
+        resultado += f"Notación prefija:  {prefix}\n\n"
         resultado += f"Árbol sintáctico:\n"
-        resultado += imprimir_arbol_operacion(operacion['expresion'])
+        resultado += imprimir_arbol_operacion(nodo)
         resultado += "\n" + "="*60 + "\n\n"
     
+    return resultado
+
+def generar_resultados_texto():
+    """Genera la sección de resultados: operaciones evaluadas y tabla de variables con valores."""
+    resultado = ""
+    if not arboles_operaciones:
+        resultado += "No hay operaciones para evaluar.\n\n"
+    else:
+        resultado += "RESULTADOS DE EVALUACIÓN DE OPERACIONES\n"
+        resultado += "="*50 + "\n\n"
+        for i, op in enumerate(arboles_operaciones, 1):
+            nodo = op['expresion']
+            infija = expresion_a_texto(nodo)
+            postfix = nodo_a_postfijo(nodo)
+            prefix = nodo_a_prefijo(nodo)
+            res = op.get('resultado')
+            tipo_res = op.get('tipo_resultado') or '-'
+            resultado += f"{op['variable']} := {infija}\n"
+            resultado += f"  Resultado: {res if res is not None else 'No evaluable'}\n"
+            # Mostrar cuadruplos si existen
+            resultado += "-"*40 + "\n"
+        resultado += "\n"
+
+    # Tabla de variables con valores
+    resultado += "TABLA DE VARIABLES (VALORES)\n"
+    resultado += "="*30 + "\n"
+    if analizador_sem.variables:
+        resultado += f"{'Variable':<12} {'Tipo':<6} {'Inicializada':<12} {'Valor'}\n"
+        resultado += "-"*50 + "\n"
+        for nombre, var in analizador_sem.variables.items():
+            ini = "Sí" if var.inicializada else "No"
+            resultado += f"{nombre:<12} {var.tipo:<6} {ini:<12} {var.valor if var.valor is not None else '-'}\n"
+    else:
+        resultado += "No se declararon variables.\n"
+
     return resultado
 
 def generar_reporte_semantico():
@@ -814,9 +1084,14 @@ class AnalizadorGUI:
         self.frame_semantico = ttk.Frame(self.notebook)
         self.notebook.add(self.frame_semantico, text="Análisis Semántico")
         
+        # Nueva pestaña para resultados
+        self.frame_resultados = ttk.Frame(self.notebook)
+        self.notebook.add(self.frame_resultados, text="Resultados")
+        
         self.crear_interfaz_principal()
         self.crear_interfaz_arbol()
         self.crear_interfaz_semantico()
+        self.crear_interfaz_resultados()
     
     def crear_interfaz_principal(self):
         main_frame = ttk.Frame(self.frame_principal, padding="10")
@@ -935,6 +1210,23 @@ Fin'''
         sem_frame.rowconfigure(1, weight=2)
         sem_frame.rowconfigure(3, weight=1)
     
+    def crear_interfaz_resultados(self):
+        res_frame = ttk.Frame(self.frame_resultados, padding="10")
+        res_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+
+        ttk.Label(res_frame, text="Resultados de Operaciones:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+        self.resultados_text = scrolledtext.ScrolledText(res_frame, height=40, width=120, font=('Courier', 10))
+        self.resultados_text.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+
+        scrollbar_res = ttk.Scrollbar(res_frame, orient=tk.VERTICAL, command=self.resultados_text.yview)
+        scrollbar_res.grid(row=1, column=1, sticky=(tk.N, tk.S))
+        self.resultados_text.configure(yscrollcommand=scrollbar_res.set)
+
+        self.frame_resultados.columnconfigure(0, weight=1)
+        self.frame_resultados.rowconfigure(0, weight=1)
+        res_frame.columnconfigure(0, weight=1)
+        res_frame.rowconfigure(1, weight=1)
+
     def analizar(self):
         global tabla_simbolos, contador_simbolos, errores, errores_semanticos, arboles_operaciones, lineas_codigo
         
@@ -947,6 +1239,7 @@ Fin'''
         self.arbol_text.delete('1.0', tk.END)
         self.semantico_text.delete('1.0', tk.END)
         self.errores_sem_text.delete('1.0', tk.END)
+        self.resultados_text.delete('1.0', tk.END)
         
         codigo = self.codigo_text.get('1.0', tk.END)
         lineas_codigo = codigo.split('\n')
@@ -969,6 +1262,10 @@ Fin'''
             # Árboles de operaciones
             arboles_texto = generar_arboles_texto()
             self.arbol_text.insert('1.0', arboles_texto)
+            
+            # Resultados (nueva pestaña)
+            resultados_texto = generar_resultados_texto()
+            self.resultados_text.insert('1.0', resultados_texto)
             
             # Reporte semántico
             reporte_semantico = generar_reporte_semantico()
@@ -1089,6 +1386,7 @@ Fin'''
         self.arbol_text.delete('1.0', tk.END)
         self.semantico_text.delete('1.0', tk.END)
         self.errores_sem_text.delete('1.0', tk.END)
+        self.resultados_text.delete('1.0', tk.END)
         
         self.mensajes_text.insert(tk.END, "🗑️ Todos los datos han sido limpiados.\n")
     
@@ -1123,7 +1421,7 @@ Fin'''
 if __name__ == "__main__":
     print("="*70)
     print("ANALIZADOR SEMÁNTICO PF2024 - VERSIÓN COMPLETA")
-    print("Incluye detección avanzada de errores semánticos")
+    print("Incluye detección avanzada de errores semánticos y generación de cuádruplos")
     print("="*70)
     
     root = tk.Tk()
