@@ -1,11 +1,12 @@
 """
-ANALIZADOR SEMÁNTICO CON GENERACIÓN DE CÓDIGO
+COMPILADOR COMPLETO - AUTOMATAS 2
+Analizador Léxico, Sintáctico, Semántico y Generación de Código Intermedio
 """
 
 import ply.lex as lex
 import ply.yacc as yacc
 import tkinter as tk
-from tkinter import scrolledtext, ttk, filedialog
+from tkinter import scrolledtext, ttk, filedialog, messagebox
 import re
 
 # ================= DEFINICIÓN DE TOKENS =================
@@ -75,6 +76,7 @@ lineas_codigo = []
 tabla_tipos = {}
 temp_counter = 0
 cuadruplos_globales = []
+codigo_intermedio = []  # Nueva lista para código intermedio formateado
 
 # ================= CLASES PARA ANÁLISIS SEMÁNTICO =================
 
@@ -228,7 +230,7 @@ def agregar_simbolo(lexema, token, referencia=None):
     return nuevo_simbolo
 
 def reiniciar_datos():
-    global errores, errores_semanticos, tabla_simbolos, contador_simbolos, arboles_operaciones, lineas_codigo, tabla_tipos, temp_counter, cuadruplos_globales
+    global errores, errores_semanticos, tabla_simbolos, contador_simbolos, arboles_operaciones, lineas_codigo, tabla_tipos, temp_counter, cuadruplos_globales, codigo_intermedio
     errores = []
     errores_semanticos = []
     tabla_simbolos = []
@@ -238,6 +240,7 @@ def reiniciar_datos():
     tabla_tipos = {}
     temp_counter = 0
     cuadruplos_globales = []
+    codigo_intermedio = []  # Reiniciar código intermedio
     analizador_sem.reiniciar()
 
 def obtener_linea_actual(p):
@@ -725,6 +728,45 @@ def generar_cuadruplos_desde_nodo(nodo, quads=None):
         return t, quads
     return None, quads
 
+def generar_codigo_intermedio_formateado():
+    """Genera código intermedio en formato: 001: a = 5, 002: t1 = 3 * 2, etc."""
+    global codigo_intermedio
+    codigo_intermedio = []
+    
+    if not cuadruplos_globales:
+        return "No se generó código intermedio.\n"
+    
+    resultado = "╔═══════════════════════════════════════════════════════════╗\n"
+    resultado += "║          CÓDIGO INTERMEDIO DE TRES DIRECCIONES           ║\n"
+    resultado += "╚═══════════════════════════════════════════════════════════╝\n\n"
+    
+    for i, cuad in enumerate(cuadruplos_globales, 1):
+        op, arg1, arg2, res = cuad
+        linea_num = f"{i:03d}"
+        
+        # Formatear según el tipo de operación
+        if op == ':=':
+            linea_codigo = f"{linea_num}: {res} = {arg1}"
+        elif op in ['+', '-', '*', '/']:
+            if arg2 is None:  # Operación unaria
+                linea_codigo = f"{linea_num}: {res} = {op}{arg1}"
+            else:  # Operación binaria
+                linea_codigo = f"{linea_num}: {res} = {arg1} {op} {arg2}"
+        elif op == 'impcad':
+            linea_codigo = f"{linea_num}: print({arg1})"
+        elif op == 'leerdig':
+            linea_codigo = f"{linea_num}: read({res})"
+        else:
+            linea_codigo = f"{linea_num}: {op} {arg1} {arg2} {res}"
+        
+        codigo_intermedio.append(linea_codigo)
+        resultado += linea_codigo + "\n"
+    
+    resultado += "\n" + "─" * 60 + "\n"
+    resultado += f"Total de instrucciones: {len(cuadruplos_globales)}\n"
+    
+    return resultado
+
 def generar_arboles_texto():
     if not arboles_operaciones:
         return "No se encontraron operaciones aritméticas en el código."
@@ -770,58 +812,68 @@ def generar_resultados_texto():
 def generar_reporte_semantico():
     if not errores_semanticos and not analizador_sem.variables:
         return "No se realizó análisis semántico."
-    resultado = "REPORTE DE ANÁLISIS SEMÁNTICO\n"
-    resultado += "="*50 + "\n\n"
-    resultado += "1. TABLA DE VARIABLES DECLARADAS:\n"
-    resultado += "-"*40 + "\n"
+    resultado = "╔═══════════════════════════════════════════════════════════╗\n"
+    resultado += "║              REPORTE DE ANÁLISIS SEMÁNTICO                ║\n"
+    resultado += "╚═══════════════════════════════════════════════════════════╝\n\n"
+    
+    resultado += "┌─ TABLA DE VARIABLES DECLARADAS ─────────────────────────┐\n"
     if analizador_sem.variables:
-        resultado += f"{'Variable':<15} {'Tipo':<8} {'Línea':<6} {'Inicial.':<8} {'Usada':<6}\n"
-        resultado += "-"*70 + "\n"
+        resultado += f"│ {'Variable':<15} {'Tipo':<8} {'Línea':<6} {'Inic.':<6} {'Usada':<6} │\n"
+        resultado += "├" + "─"*58 + "┤\n"
         for nombre, var in analizador_sem.variables.items():
-            inicializada = "Si" if var.inicializada else "No"
-            usada = "Si" if var.usada else "No"
-            resultado += f"{nombre:<15} {var.tipo:<8} {var.linea_declaracion:<6} {inicializada:<8} {usada:<6}\n"
+            inicializada = "Sí" if var.inicializada else "No"
+            usada = "Sí" if var.usada else "No"
+            resultado += f"│ {nombre:<15} {var.tipo:<8} {var.linea_declaracion:<6} {inicializada:<6} {usada:<6} │\n"
     else:
-        resultado += "No se encontraron variables declaradas.\n"
-    resultado += "\n"
-    resultado += "2. ESTADÍSTICAS:\n"
-    resultado += "-"*20 + "\n"
-    resultado += f"Variables declaradas: {len(analizador_sem.variables)}\n"
-    resultado += f"Variables utilizadas: {len(analizador_sem.variables_utilizadas)}\n"
-    resultado += f"Errores semánticos: {len(errores_semanticos)}\n\n"
+        resultado += "│ No se encontraron variables declaradas.                  │\n"
+    resultado += "└" + "─"*58 + "┘\n\n"
+    
+    resultado += "┌─ ESTADÍSTICAS ──────────────────────────────────────────┐\n"
+    resultado += f"│ Variables declaradas: {len(analizador_sem.variables):<35} │\n"
+    resultado += f"│ Variables utilizadas: {len(analizador_sem.variables_utilizadas):<35} │\n"
+    resultado += f"│ Errores semánticos:   {len(errores_semanticos):<35} │\n"
+    resultado += "└" + "─"*58 + "┘\n\n"
+    
     if errores_semanticos:
-        resultado += "3. ERRORES SEMÁNTICOS:\n"
-        resultado += "-"*35 + "\n"
+        resultado += "┌─ ERRORES SEMÁNTICOS ────────────────────────────────────┐\n"
         for i, error in enumerate(errores_semanticos, 1):
-            resultado += f"Error #{i}:\n"
-            resultado += f"  Línea: {error.linea}\n"
-            resultado += f"  Tipo: {error.tipo}\n"
-            resultado += f"  Descripción: {error.descripcion}\n\n"
+            resultado += f"│ Error #{i}:\n"
+            resultado += f"│   Línea: {error.linea}\n"
+            resultado += f"│   Tipo: {error.tipo}\n"
+            resultado += f"│   Descripción: {error.descripcion}\n"
+            if error.sugerencia:
+                resultado += f"│   Sugerencia: {error.sugerencia}\n"
+            resultado += "│\n"
+        resultado += "└" + "─"*58 + "┘\n"
     else:
-        resultado += "3. No se encontraron errores semánticos.\n\n"
+        resultado += "✓ No se encontraron errores semánticos.\n\n"
+    
     return resultado
 
 def generar_codigo_fuente():
     if not cuadruplos_globales:
         return "No se generaron cuádruplos.\n"
-    resultado = "GENERACIÓN DE CÓDIGO FUENTE\n"
-    resultado += "="*60 + "\n\n"
-    resultado += "CUÁDRUPLOS GENERADOS:\n"
-    resultado += "-"*60 + "\n"
-    resultado += f"{'#':<4} {'Operador':<10} {'Arg1':<12} {'Arg2':<12} {'Resultado':<12}\n"
-    resultado += "-"*60 + "\n"
+    resultado = "╔═══════════════════════════════════════════════════════════╗\n"
+    resultado += "║                  CUÁDRUPLOS GENERADOS                     ║\n"
+    resultado += "╚═══════════════════════════════════════════════════════════╝\n\n"
+    
+    resultado += f"{'#':<5} {'Operador':<12} {'Arg1':<12} {'Arg2':<12} {'Resultado':<12}\n"
+    resultado += "─" * 60 + "\n"
     for i, cuad in enumerate(cuadruplos_globales, 1):
         op, arg1, arg2, res = cuad
-        arg1_str = str(arg1) if arg1 is not None else '-'
-        arg2_str = str(arg2) if arg2 is not None else '-'
-        res_str = str(res) if res is not None else '-'
-        resultado += f"{i:<4} {op:<10} {arg1_str:<12} {arg2_str:<12} {res_str:<12}\n"
-    resultado += "\n" + "="*60 + "\n\n"
-    resultado += "CÓDIGO ENSAMBLADOR EQUIVALENTE (x86):\n"
-    resultado += "-"*60 + "\n"
+        arg1_str = str(arg1) if arg1 is not None else '─'
+        arg2_str = str(arg2) if arg2 is not None else '─'
+        res_str = str(res) if res is not None else '─'
+        resultado += f"{i:<5} {op:<12} {arg1_str:<12} {arg2_str:<12} {res_str:<12}\n"
+    
+    resultado += "\n" + "═" * 60 + "\n\n"
+    resultado += "╔═══════════════════════════════════════════════════════════╗\n"
+    resultado += "║          CÓDIGO ENSAMBLADOR EQUIVALENTE (x86)            ║\n"
+    resultado += "╚═══════════════════════════════════════════════════════════╝\n\n"
+    
     for i, cuad in enumerate(cuadruplos_globales, 1):
         op, arg1, arg2, res = cuad
-        resultado += f"; Cuádruplo {i}\n"
+        resultado += f"; ─── Cuádruplo {i} ───\n"
         if op == ':=':
             resultado += f"MOV {res}, {arg1}\n"
         elif op == '+':
@@ -855,36 +907,103 @@ def generar_codigo_fuente():
         resultado += "\n"
     return resultado
 
-# ================= INTERFAZ GRÁFICA =================
+# ================= INTERFAZ GRÁFICA MEJORADA =================
 class AnalizadorGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Analizador Completo con Generación de Código - PF2024")
-        self.root.geometry("1600x1000")
-        self.notebook = ttk.Notebook(root)
-        self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
-        self.frame_principal = ttk.Frame(self.notebook)
-        self.notebook.add(self.frame_principal, text="Análisis Principal")
-        self.frame_arbol = ttk.Frame(self.notebook)
-        self.notebook.add(self.frame_arbol, text="Árboles de Operaciones")
-        self.frame_semantico = ttk.Frame(self.notebook)
-        self.notebook.add(self.frame_semantico, text="Análisis Semántico")
-        self.frame_resultados = ttk.Frame(self.notebook)
-        self.notebook.add(self.frame_resultados, text="Resultados")
-        self.frame_generacion = ttk.Frame(self.notebook)
-        self.notebook.add(self.frame_generacion, text="Generación de Código")
-        self.crear_interfaz_principal()
-        self.crear_interfaz_arbol()
-        self.crear_interfaz_semantico()
-        self.crear_interfaz_resultados()
-        self.crear_interfaz_generacion()
+        self.root.title("Compilador PF2024 - Automatas 2")
+        self.root.geometry("1400x900")
+        
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        self.color_bg = "#f0f0f0"
+        self.color_primary = "#2c3e50"
+        self.color_success = "#27ae60"
+        self.color_error = "#e74c3c"
+        self.color_warning = "#f39c12"
+        
+        self.root.configure(bg=self.color_bg)
+        
+        self.crear_barra_superior()
+        self.crear_area_trabajo()
+        
+    def crear_barra_superior(self):
+        """Crea la barra superior con título y botones principales"""
+        barra = tk.Frame(self.root, bg=self.color_primary, height=80)
+        barra.pack(fill='x', side='top')
+        
+        # Título
+        titulo = tk.Label(barra, text="🔧 COMPILADOR PF2024", 
+                         font=('Arial', 20, 'bold'), 
+                         bg=self.color_primary, fg='white')
+        titulo.pack(side='left', padx=20, pady=15)
+        
+        subtitulo = tk.Label(barra, text="Análisis Léxico • Sintáctico • Semántico • Generación de Código", 
+                            font=('Arial', 10), 
+                            bg=self.color_primary, fg='#ecf0f1')
+        subtitulo.pack(side='left', padx=5)
+        
+        # Botones principales
+        btn_frame = tk.Frame(barra, bg=self.color_primary)
+        btn_frame.pack(side='right', padx=20)
+        
+        btn_analizar = tk.Button(btn_frame, text="▶ Analizar", 
+                                command=self.analizar,
+                                bg=self.color_success, fg='white',
+                                font=('Arial', 11, 'bold'),
+                                padx=20, pady=8, relief='flat',
+                                cursor='hand2')
+        btn_analizar.pack(side='left', padx=5)
+        
+        btn_limpiar = tk.Button(btn_frame, text="🗑 Limpiar", 
+                               command=self.limpiar_todo,
+                               bg=self.color_warning, fg='white',
+                               font=('Arial', 11, 'bold'),
+                               padx=20, pady=8, relief='flat',
+                               cursor='hand2')
+        btn_limpiar.pack(side='left', padx=5)
+        
+        btn_cargar = tk.Button(btn_frame, text="📁 Cargar", 
+                              command=self.cargar_archivo,
+                              bg='#3498db', fg='white',
+                              font=('Arial', 11, 'bold'),
+                              padx=20, pady=8, relief='flat',
+                              cursor='hand2')
+        btn_cargar.pack(side='left', padx=5)
     
-    def crear_interfaz_principal(self):
-        main_frame = ttk.Frame(self.frame_principal, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        ttk.Label(main_frame, text="Código fuente:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
-        self.codigo_text = scrolledtext.ScrolledText(main_frame, height=15, width=80)
-        self.codigo_text.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+    def crear_area_trabajo(self):
+        """Crea el área de trabajo con pestañas"""
+        # Frame contenedor
+        container = tk.Frame(self.root, bg=self.color_bg)
+        container.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Panel izquierdo - Editor de código
+        panel_izq = tk.Frame(container, bg='white', relief='solid', borderwidth=1)
+        panel_izq.pack(side='left', fill='both', expand=True, padx=(0, 5))
+        
+        # Título del editor
+        titulo_editor = tk.Label(panel_izq, text="📝 Editor de Código Fuente", 
+                                font=('Arial', 12, 'bold'),
+                                bg='white', fg=self.color_primary)
+        titulo_editor.pack(pady=10)
+        
+        # Editor de código con números de línea
+        editor_frame = tk.Frame(panel_izq, bg='white')
+        editor_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+        
+        self.codigo_text = scrolledtext.ScrolledText(editor_frame, 
+                                                     height=25, 
+                                                     font=('Consolas', 11),
+                                                     wrap=tk.NONE,
+                                                     bg='#fafafa',
+                                                     fg='#2c3e50',
+                                                     insertbackground='#e74c3c',
+                                                     selectbackground='#3498db',
+                                                     selectforeground='white')
+        self.codigo_text.pack(fill='both', expand=True)
+        
+        # Código de ejemplo
         codigo_ejemplo = '''pf2024 programa
 decl
 Int a, b, resultado;
@@ -899,116 +1018,155 @@ impcad(mensaje);
 leerdig(a);
 Fin'''
         self.codigo_text.insert('1.0', codigo_ejemplo)
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=2, column=0, columnspan=2, pady=(0, 10))
-        ttk.Button(button_frame, text="Analizar", command=self.analizar).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(button_frame, text="Limpiar", command=self.limpiar_todo).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(button_frame, text="Cargar Archivo", command=self.cargar_archivo).pack(side=tk.LEFT)
-        ttk.Label(main_frame, text="Tabla de Símbolos:").grid(row=3, column=0, sticky=tk.W, pady=(10, 5))
+        
+        # Panel derecho - Resultados con pestañas
+        panel_der = tk.Frame(container, bg='white', relief='solid', borderwidth=1)
+        panel_der.pack(side='right', fill='both', expand=True, padx=(5, 0))
+        
+        # Notebook para pestañas
+        self.notebook = ttk.Notebook(panel_der)
+        self.notebook.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Crear pestañas
+        self.crear_pestana_simbolos()
+        self.crear_pestana_codigo_intermedio()
+        self.crear_pestana_semantico()
+        self.crear_pestana_cuadruplos()
+        self.crear_pestana_errores()
+        
+    def crear_pestana_simbolos(self):
+        """Pestaña de tabla de símbolos"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="📋 Tabla de Símbolos")
+        
+        # Treeview para la tabla
         columns = ('No.', 'Lexema', 'Token', 'Referencia')
-        self.tabla_tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=12)
+        self.tabla_tree = ttk.Treeview(frame, columns=columns, show='headings', height=20)
+        
         for col in columns:
             self.tabla_tree.heading(col, text=col)
-            self.tabla_tree.column(col, width=150)
-        self.tabla_tree.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E))
-        scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=self.tabla_tree.yview)
-        scrollbar.grid(row=4, column=2, sticky=(tk.N, tk.S))
+            self.tabla_tree.column(col, width=120)
+        
+        self.tabla_tree.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.tabla_tree.yview)
+        scrollbar.pack(side='right', fill='y')
         self.tabla_tree.configure(yscrollcommand=scrollbar.set)
-        ttk.Label(main_frame, text="Errores:").grid(row=5, column=0, sticky=tk.W, pady=(10, 5))
-        self.errores_text = scrolledtext.ScrolledText(main_frame, height=10, width=80)
-        self.errores_text.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E))
-        self.frame_principal.columnconfigure(0, weight=1)
-        self.frame_principal.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(0, weight=1)
     
-    def crear_interfaz_arbol(self):
-        arbol_frame = ttk.Frame(self.frame_arbol, padding="10")
-        arbol_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        ttk.Label(arbol_frame, text="Árboles de Operaciones:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
-        self.arbol_text = scrolledtext.ScrolledText(arbol_frame, height=40, width=120, font=('Courier', 10))
-        self.arbol_text.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        scrollbar_arbol = ttk.Scrollbar(arbol_frame, orient=tk.VERTICAL, command=self.arbol_text.yview)
-        scrollbar_arbol.grid(row=1, column=1, sticky=(tk.N, tk.S))
-        self.arbol_text.configure(yscrollcommand=scrollbar_arbol.set)
-        self.frame_arbol.columnconfigure(0, weight=1)
-        self.frame_arbol.rowconfigure(0, weight=1)
-        arbol_frame.columnconfigure(0, weight=1)
-        arbol_frame.rowconfigure(1, weight=1)
+    def crear_pestana_codigo_intermedio(self):
+        """Pestaña de código intermedio"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="⚙️ Código Intermedio")
+        
+        self.intermedio_text = scrolledtext.ScrolledText(frame, 
+                                                         height=30, 
+                                                         font=('Consolas', 10),
+                                                         bg='#fafafa',
+                                                         fg='#2c3e50')
+        self.intermedio_text.pack(fill='both', expand=True, padx=10, pady=10)
     
-    def crear_interfaz_semantico(self):
-        sem_frame = ttk.Frame(self.frame_semantico, padding="10")
-        sem_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        ttk.Label(sem_frame, text="Análisis Semántico:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
-        self.semantico_text = scrolledtext.ScrolledText(sem_frame, height=40, width=120, font=('Courier', 10))
-        self.semantico_text.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        scrollbar_sem = ttk.Scrollbar(sem_frame, orient=tk.VERTICAL, command=self.semantico_text.yview)
-        scrollbar_sem.grid(row=1, column=1, sticky=(tk.N, tk.S))
-        self.semantico_text.configure(yscrollcommand=scrollbar_sem.set)
-        self.frame_semantico.columnconfigure(0, weight=1)
-        self.frame_semantico.rowconfigure(0, weight=1)
-        sem_frame.columnconfigure(0, weight=1)
-        sem_frame.rowconfigure(1, weight=1)
+    def crear_pestana_semantico(self):
+        """Pestaña de análisis semántico"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="🔍 Análisis Semántico")
+        
+        self.semantico_text = scrolledtext.ScrolledText(frame, 
+                                                        height=30, 
+                                                        font=('Consolas', 10),
+                                                        bg='#fafafa',
+                                                        fg='#2c3e50')
+        self.semantico_text.pack(fill='both', expand=True, padx=10, pady=10)
     
-    def crear_interfaz_resultados(self):
-        res_frame = ttk.Frame(self.frame_resultados, padding="10")
-        res_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        ttk.Label(res_frame, text="Resultados:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
-        self.resultados_text = scrolledtext.ScrolledText(res_frame, height=40, width=120, font=('Courier', 10))
-        self.resultados_text.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        scrollbar_res = ttk.Scrollbar(res_frame, orient=tk.VERTICAL, command=self.resultados_text.yview)
-        scrollbar_res.grid(row=1, column=1, sticky=(tk.N, tk.S))
-        self.resultados_text.configure(yscrollcommand=scrollbar_res.set)
-        self.frame_resultados.columnconfigure(0, weight=1)
-        self.frame_resultados.rowconfigure(0, weight=1)
-        res_frame.columnconfigure(0, weight=1)
-        res_frame.rowconfigure(1, weight=1)
+    def crear_pestana_cuadruplos(self):
+        """Pestaña de cuádruplos y ensamblador"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="🔧 Cuádruplos & ASM")
+        
+        self.cuadruplos_text = scrolledtext.ScrolledText(frame, 
+                                                         height=30, 
+                                                         font=('Consolas', 10),
+                                                         bg='#fafafa',
+                                                         fg='#2c3e50')
+        self.cuadruplos_text.pack(fill='both', expand=True, padx=10, pady=10)
     
-    def crear_interfaz_generacion(self):
-        gen_frame = ttk.Frame(self.frame_generacion, padding="10")
-        gen_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        ttk.Label(gen_frame, text="Generación de Código:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
-        self.generacion_text = scrolledtext.ScrolledText(gen_frame, height=40, width=120, font=('Courier', 10))
-        self.generacion_text.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        scrollbar_gen = ttk.Scrollbar(gen_frame, orient=tk.VERTICAL, command=self.generacion_text.yview)
-        scrollbar_gen.grid(row=1, column=1, sticky=(tk.N, tk.S))
-        self.generacion_text.configure(yscrollcommand=scrollbar_gen.set)
-        self.frame_generacion.columnconfigure(0, weight=1)
-        self.frame_generacion.rowconfigure(0, weight=1)
-        gen_frame.columnconfigure(0, weight=1)
-        gen_frame.rowconfigure(1, weight=1)
+    def crear_pestana_errores(self):
+        """Pestaña de errores"""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="⚠️ Errores")
+        
+        self.errores_text = scrolledtext.ScrolledText(frame, 
+                                                      height=30, 
+                                                      font=('Consolas', 10),
+                                                      bg='#fff5f5',
+                                                      fg='#c0392b')
+        self.errores_text.pack(fill='both', expand=True, padx=10, pady=10)
 
     def analizar(self):
+        """Ejecuta el análisis completo del código"""
         reiniciar_datos()
+        
+        # Limpiar todas las áreas de texto
         self.errores_text.delete('1.0', tk.END)
-        self.arbol_text.delete('1.0', tk.END)
+        self.intermedio_text.delete('1.0', tk.END)
         self.semantico_text.delete('1.0', tk.END)
-        self.resultados_text.delete('1.0', tk.END)
-        self.generacion_text.delete('1.0', tk.END)
+        self.cuadruplos_text.delete('1.0', tk.END)
+        
         codigo = self.codigo_text.get('1.0', tk.END)
         global lineas_codigo
         lineas_codigo = codigo.split('\n')
+        
         try:
+            # Análisis léxico y sintáctico
             self.reiniciar_lexer()
             analizador_lexico.input(codigo)
             self.reiniciar_lexer()
             analizador_lexico.input(codigo)
             parser.parse(lexer=analizador_lexico)
+            
+            # Actualizar resultados
             self.actualizar_tabla()
-            self.arbol_text.insert('1.0', generar_arboles_texto())
-            self.resultados_text.insert('1.0', generar_resultados_texto())
+            self.intermedio_text.insert('1.0', generar_codigo_intermedio_formateado())
             self.semantico_text.insert('1.0', generar_reporte_semantico())
-            self.generacion_text.insert('1.0', generar_codigo_fuente())
-            if errores:
-                self.errores_text.insert(tk.END, "ERRORES ENCONTRADOS:\n" + "="*50 + "\n")
-                for i, error in enumerate(errores, 1):
-                    self.errores_text.insert(tk.END, f"Error #{i}: Línea {error['line']}\n")
-                    self.errores_text.insert(tk.END, f"  {error['desc']}\n\n")
+            self.cuadruplos_text.insert('1.0', generar_codigo_fuente())
+            
+            # Mostrar errores
+            if errores or errores_semanticos:
+                self.errores_text.insert(tk.END, "╔═══════════════════════════════════════════════════════════╗\n")
+                self.errores_text.insert(tk.END, "║                  ERRORES ENCONTRADOS                      ║\n")
+                self.errores_text.insert(tk.END, "╚═══════════════════════════════════════════════════════════╝\n\n")
+                
+                if errores:
+                    self.errores_text.insert(tk.END, "┌─ ERRORES LÉXICOS Y SINTÁCTICOS ─────────────────────────┐\n")
+                    for i, error in enumerate(errores, 1):
+                        self.errores_text.insert(tk.END, f"│ Error #{i}: Línea {error['line']}\n")
+                        self.errores_text.insert(tk.END, f"│   {error['desc']}\n")
+                        self.errores_text.insert(tk.END, "│\n")
+                    self.errores_text.insert(tk.END, "└" + "─"*58 + "┘\n\n")
+                
+                if errores_semanticos:
+                    self.errores_text.insert(tk.END, "┌─ ERRORES SEMÁNTICOS ────────────────────────────────────┐\n")
+                    for i, error in enumerate(errores_semanticos, 1):
+                        self.errores_text.insert(tk.END, f"│ Error #{i}: Línea {error.linea}\n")
+                        self.errores_text.insert(tk.END, f"│   Tipo: {error.tipo}\n")
+                        self.errores_text.insert(tk.END, f"│   {error.descripcion}\n")
+                        if error.sugerencia:
+                            self.errores_text.insert(tk.END, f"│   💡 {error.sugerencia}\n")
+                        self.errores_text.insert(tk.END, "│\n")
+                    self.errores_text.insert(tk.END, "└" + "─"*58 + "┘\n")
+                
+                messagebox.showwarning("Análisis Completado", 
+                                      f"Se encontraron {len(errores) + len(errores_semanticos)} errores.\nRevise la pestaña de Errores.")
             else:
-                self.errores_text.insert(tk.END, "No se encontraron errores.\n")
+                self.errores_text.insert(tk.END, "✓ ¡Análisis completado exitosamente!\n\n")
+                self.errores_text.insert(tk.END, "No se encontraron errores léxicos, sintácticos ni semánticos.\n")
+                messagebox.showinfo("Éxito", "¡Análisis completado sin errores!")
+                
         except Exception as e:
-            self.errores_text.insert(tk.END, f"Error: {str(e)}\n")
+            self.errores_text.insert(tk.END, f"❌ Error crítico: {str(e)}\n")
+            messagebox.showerror("Error", f"Error durante el análisis:\n{str(e)}")
     
     def actualizar_tabla(self):
+        """Actualiza la tabla de símbolos"""
         for item in self.tabla_tree.get_children():
             self.tabla_tree.delete(item)
         for simbolo in tabla_simbolos:
@@ -1017,34 +1175,40 @@ Fin'''
             ))
     
     def limpiar_todo(self):
+        """Limpia todos los resultados"""
         reiniciar_datos()
         self.actualizar_tabla()
         self.errores_text.delete('1.0', tk.END)
-        self.arbol_text.delete('1.0', tk.END)
+        self.intermedio_text.delete('1.0', tk.END)
         self.semantico_text.delete('1.0', tk.END)
-        self.resultados_text.delete('1.0', tk.END)
-        self.generacion_text.delete('1.0', tk.END)
+        self.cuadruplos_text.delete('1.0', tk.END)
+        messagebox.showinfo("Limpieza", "Todos los resultados han sido limpiados.")
     
     def cargar_archivo(self):
+        """Carga un archivo de código"""
         file_path = filedialog.askopenfilename(
             title="Seleccionar archivo",
-            filetypes=[("Archivos PF2024", "*.pf"), ("Todos", "*.*")]
+            filetypes=[("Archivos PF2024", "*.pf"), ("Archivos de texto", "*.txt"), ("Todos", "*.*")]
         )
         if file_path:
             try:
                 with open(file_path, 'r', encoding='utf-8') as file:
                     self.codigo_text.delete('1.0', tk.END)
                     self.codigo_text.insert('1.0', file.read())
+                messagebox.showinfo("Éxito", f"Archivo cargado: {file_path}")
             except Exception as e:
-                self.errores_text.insert(tk.END, f"Error al cargar: {str(e)}\n")
+                messagebox.showerror("Error", f"Error al cargar el archivo:\n{str(e)}")
 
     def reiniciar_lexer(self):
+        """Reinicia el analizador léxico"""
         analizador_lexico.lineno = 1
         analizador_lexico.lexpos = 0
 
+# ================= PUNTO DE ENTRADA =================
 if __name__ == "__main__":
     print("="*70)
-    print("ANALIZADOR COMPLETO CON GENERACIÓN DE CÓDIGO - PF2024")
+    print("COMPILADOR PF2024 - AUTOMATAS 2")
+    print("Análisis Léxico, Sintáctico, Semántico y Generación de Código")
     print("="*70)
     root = tk.Tk()
     app = AnalizadorGUI(root)
