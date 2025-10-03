@@ -1,5 +1,5 @@
 """
-ANALIZADOR SEMÁNTICO
+ANALIZADOR SEMÁNTICO CON GENERACIÓN DE CÓDIGO
 """
 
 import ply.lex as lex
@@ -71,11 +71,10 @@ tabla_simbolos = []
 contador_simbolos = 1
 arboles_operaciones = []
 t_ignore = ' \t'
-lineas_codigo = []  # Para mostrar contexto de errores
-tabla_tipos = {}  # Para almacenar tipos de variables
-
-# Contador global de temporales para cuádruplos
+lineas_codigo = []
+tabla_tipos = {}
 temp_counter = 0
+cuadruplos_globales = []
 
 # ================= CLASES PARA ANÁLISIS SEMÁNTICO =================
 
@@ -95,11 +94,11 @@ class Variable:
         self.inicializada = inicializada
         self.usada = False
         self.lineas_uso = []
-        self.valor = None  # almacena el valor actual de la variable
+        self.valor = None
 
 class AnalizadorSemantico:
     def __init__(self):
-        self.variables = {}  # nombre -> Variable
+        self.variables = {}
         self.variables_declaradas = set()
         self.variables_utilizadas = set()
         self.en_declaracion = False
@@ -115,7 +114,6 @@ class AnalizadorSemantico:
         self.linea_actual = 1
 
     def declarar_variable(self, nombre, tipo, linea):
-        """Declara una variable y verifica duplicados"""
         if nombre in self.variables:
             error = ErrorSemantico(
                 linea=linea,
@@ -130,7 +128,6 @@ class AnalizadorSemantico:
             self.variables_declaradas.add(nombre)
     
     def usar_variable(self, nombre, linea):
-        """Registra el uso de una variable y verifica que esté declarada"""
         if nombre not in self.variables:
             error = ErrorSemantico(
                 linea=linea,
@@ -148,7 +145,6 @@ class AnalizadorSemantico:
             return self.variables[nombre]
     
     def asignar_variable(self, nombre, tipo_expresion, linea):
-        """Verifica compatibilidad de tipos en asignación"""
         variable = self.usar_variable(nombre, linea)
         if variable:
             if tipo_expresion and variable.tipo != tipo_expresion:
@@ -163,7 +159,6 @@ class AnalizadorSemantico:
             variable.inicializada = True
     
     def verificar_operacion_aritmetica(self, operandos, operador, linea):
-        """Verifica que los operandos sean compatibles con operaciones aritméticas"""
         tipo_esperado = "Int"
         for operando in operandos:
             if isinstance(operando, str) and operando in self.variables:
@@ -179,7 +174,6 @@ class AnalizadorSemantico:
                     errores_semanticos.append(error)
     
     def verificar_variables_no_utilizadas(self):
-        """Identifica variables declaradas pero no utilizadas"""
         for nombre, variable in self.variables.items():
             if not variable.usada:
                 error = ErrorSemantico(
@@ -192,7 +186,6 @@ class AnalizadorSemantico:
                 errores_semanticos.append(error)
     
     def verificar_variables_no_inicializadas(self):
-        """Identifica variables utilizadas sin inicializar"""
         for nombre, variable in self.variables.items():
             if variable.usada and not variable.inicializada:
                 error = ErrorSemantico(
@@ -204,7 +197,6 @@ class AnalizadorSemantico:
                 )
                 errores_semanticos.append(error)
 
-# Instancia global del analizador semántico
 analizador_sem = AnalizadorSemantico()
 
 # ================= CLASES AUXILIARES =================
@@ -215,17 +207,7 @@ class NodoOperacion:
         self.izquierdo = izquierdo
         self.derecho = derecho
         self.linea = linea or 1
-        self.tipo_dato = None  # Para análisis semántico
-    
-    def __str__(self):
-        if self.tipo == 'operacion':
-            return f"operacion: {self.valor}"
-        elif self.tipo == 'termino':
-            return f"termino: {self.valor}"
-        elif self.tipo == 'ID':
-            return f"ID: {self.valor}"
-        else:
-            return str(self.valor)
+        self.tipo_dato = None
 
 class SimboloTabla:
     def __init__(self, lexema, token, referencia=None):
@@ -246,7 +228,7 @@ def agregar_simbolo(lexema, token, referencia=None):
     return nuevo_simbolo
 
 def reiniciar_datos():
-    global errores, errores_semanticos, tabla_simbolos, contador_simbolos, arboles_operaciones, lineas_codigo, tabla_tipos, temp_counter
+    global errores, errores_semanticos, tabla_simbolos, contador_simbolos, arboles_operaciones, lineas_codigo, tabla_tipos, temp_counter, cuadruplos_globales
     errores = []
     errores_semanticos = []
     tabla_simbolos = []
@@ -255,10 +237,10 @@ def reiniciar_datos():
     lineas_codigo = []
     tabla_tipos = {}
     temp_counter = 0
+    cuadruplos_globales = []
     analizador_sem.reiniciar()
 
 def obtener_linea_actual(p):
-    """Obtiene el número de línea del token actual de forma segura"""
     try:
         if hasattr(p, 'lineno'):
             if hasattr(p.lineno, '__call__'):
@@ -271,32 +253,6 @@ def obtener_linea_actual(p):
             return 1
     except (AttributeError, IndexError):
         return 1
-
-def validar_parametro(parametro, nombre_funcion, tipo_esperado, linea):
-    """Valida un parámetro de función de forma segura"""
-    if parametro is None:
-        error = ErrorSemantico(
-            linea=linea,
-            tipo="PARAMETRO_FALTANTE",
-            descripcion=f"La función '{nombre_funcion}' requiere un parámetro",
-            contexto=f"Llamada a '{nombre_funcion}' sin parámetro",
-            sugerencia=f"Proporcione un parámetro de tipo '{tipo_esperado}'"
-        )
-        errores_semanticos.append(error)
-        return False
-    
-    if not isinstance(parametro, str):
-        error = ErrorSemantico(
-            linea=linea,
-            tipo="PARAMETRO_INVALIDO",
-            descripcion=f"Parámetro inválido para función '{nombre_funcion}'",
-            contexto=f"Se esperaba un parámetro válido",
-            sugerencia=f"Verifique la sintaxis de la llamada a '{nombre_funcion}'"
-        )
-        errores_semanticos.append(error)
-        return False
-    
-    return True
 
 # ================= FUNCIONES DE TOKENS =================
 
@@ -360,10 +316,9 @@ def t_error(t):
     })
     t.lexer.skip(1)
 
-# Construcción del analizador léxico
 analizador_lexico = lex.lex()
 
-# ================= ANALIZADOR SINTÁCTICO CON ANÁLIIS SEMÁNTICO =================
+# ================= ANALIZADOR SINTÁCTICO =================
 
 precedence = (
     ('left', 'MAS', 'MENOS'),
@@ -371,14 +326,12 @@ precedence = (
     ('right', 'UMINUS'),
 )
 
-# ================= REGLAS GRAMATICALES CON ANÁLISIS SEMÁNTICO =================
+# ================= REGLAS GRAMATICALES =================
 
 def p_programa(p):
     '''programa : PROG ID programa_decl'''
     agregar_simbolo(p[1], 'PROG', 'Palabra clave del programa')
     agregar_simbolo(p[2], 'ID', 'Nombre del programa')
-    
-    # Verificaciones semánticas finales
     analizador_sem.verificar_variables_no_utilizadas()
     analizador_sem.verificar_variables_no_inicializadas()
 
@@ -421,12 +374,10 @@ def p_lista_variables(p):
     
     if len(p) == 2:
         agregar_simbolo(p[1], 'ID', 'Variable')
-        # Análisis semántico: declarar variable
         analizador_sem.declarar_variable(p[1], analizador_sem.tipo_actual, linea)
     else:
         agregar_simbolo(p[1], 'ID', 'Variable')
         agregar_simbolo(',', 'COMA', 'Separador de variables')
-        # Análisis semántico: declarar variable
         analizador_sem.declarar_variable(p[1], analizador_sem.tipo_actual, linea)
 
 def p_cuerpo_programa(p):
@@ -444,7 +395,6 @@ def p_instruccion(p):
                   | llamada_funcion'''
     pass
 
-# Reemplazamos p_asignacion para generar cuádruplos y evaluar
 def p_asignacion(p):
     '''asignacion : ID ASIG expresion PC'''
     linea = obtener_linea_actual(p)
@@ -453,32 +403,27 @@ def p_asignacion(p):
     agregar_simbolo(':=', 'ASIG', 'Operador de asignación')
     agregar_simbolo(';', 'PC', 'Fin de instrucción')
     
-    # Análisis semántico: verificar asignación
     tipo_expresion = None
     if p[3]:
-        tipo_expresion = getattr(p[3], 'tipo_dato', 'Int')  # Asumir Int por defecto
+        tipo_expresion = getattr(p[3], 'tipo_dato', 'Int')
     
     analizador_sem.asignar_variable(p[1], tipo_expresion, linea)
     
-    # Guardar la operación aritmética, evaluar si es posible y generar cuádruplos
     if p[3] and hasattr(p[3], 'tipo') and p[3].tipo in ['operacion', 'termino', 'ID']:
-        # Evaluar la expresión (si es posible)
         valor, tipo_eval = evaluar_nodo(p[3])
-        # si la variable existe, actualizamos su valor (si la evaluación fue posible)
         var = analizador_sem.variables.get(p[1])
         if valor is not None and var is not None:
             var.valor = valor
             var.inicializada = True
 
-        # Generar cuádruplos desde el AST
         resultado_operando, quads = generar_cuadruplos_desde_nodo(p[3], [])
 
-        # Generar cuádruplo final de asignación al destino
         asign_dest = p[1]
         if resultado_operando is not None:
             quads.append((':=', resultado_operando, None, asign_dest))
 
-        # añadir la info al registro de operaciones (incluye resultado, que puede ser None)
+        cuadruplos_globales.extend(quads)
+
         arboles_operaciones.append({
             'variable': p[1],
             'expresion': p[3],
@@ -495,7 +440,6 @@ def p_expresion_binaria(p):
                 | expresion DIV expresion'''
     linea = obtener_linea_actual(p)
     
-    # Análisis semántico: verificar operandos
     operandos = []
     if hasattr(p[1], 'valor') and isinstance(p[1].valor, str):
         operandos.append(p[1].valor)
@@ -517,7 +461,6 @@ def p_expresion_binaria(p):
         agregar_simbolo('/', 'DIV', 'Operador división')
         p[0] = NodoOperacion('operacion', '/', p[1], p[3], linea)
         
-        # Verificación semántica adicional: división por cero
         if hasattr(p[3], 'valor') and p[3].valor == '0':
             error = ErrorSemantico(
                 linea=linea,
@@ -554,7 +497,6 @@ def p_expresion_factor(p):
         p[0].tipo_dato = 'Int'
     else:
         agregar_simbolo(p[1], 'ID', 'Variable en expresión')
-        # Análisis semántico: usar variable
         variable = analizador_sem.usar_variable(p[1], linea)
         p[0] = NodoOperacion('ID', p[1], None, None, linea)
         p[0].tipo_dato = variable.tipo if variable else 'Int'
@@ -566,11 +508,11 @@ def p_llamada_funcion(p):
     
     if p[1] == 'impcad':
         agregar_simbolo('impcad', 'IMPCAD', 'Función imprimir cadena')
-        # Verificar que el parámetro no sea None
+        param = p[3] if p[3] else "None"
+        cuadruplos_globales.append(('impcad', param, None, None))
+        
         if p[3] is not None:
-            # Verificar tipo del parámetro
             if not (isinstance(p[3], str) and p[3].startswith('"') and p[3].endswith('"')):
-                # Es una variable, verificar que sea de tipo Cad
                 variable = analizador_sem.usar_variable(p[3], linea)
                 if variable and variable.tipo != 'Cad':
                     error = ErrorSemantico(
@@ -582,7 +524,6 @@ def p_llamada_funcion(p):
                     )
                     errores_semanticos.append(error)
         else:
-            # Error: parámetro faltante
             error = ErrorSemantico(
                 linea=linea,
                 tipo="PARAMETRO_FALTANTE",
@@ -594,10 +535,10 @@ def p_llamada_funcion(p):
             
     elif p[1] == 'leerdig':
         agregar_simbolo('leerdig', 'LEERDIG', 'Función leer dígito')
-        # Verificar que el parámetro no sea None
+        cuadruplos_globales.append(('leerdig', None, None, p[3]))
+        
         if p[3] is not None:
             agregar_simbolo(p[3], 'ID', 'Variable para leer')
-            # Verificar que la variable sea de tipo Int
             variable = analizador_sem.usar_variable(p[3], linea)
             if variable and variable.tipo != 'Int':
                 error = ErrorSemantico(
@@ -609,11 +550,9 @@ def p_llamada_funcion(p):
                 )
                 errores_semanticos.append(error)
             else:
-                # Marcar como inicializada ya que leerdig asigna un valor
                 if variable:
                     variable.inicializada = True
         else:
-            # Error: parámetro faltante
             error = ErrorSemantico(
                 linea=linea,
                 tipo="PARAMETRO_FALTANTE",
@@ -632,18 +571,16 @@ def p_parametro(p):
                 | ID'''
     if p[1].startswith('"') and p[1].endswith('"'):
         agregar_simbolo(p[1], 'CAD', 'Literal de cadena')
-        p[0] = p[1]  # Pasar el valor al nivel superior
+        p[0] = p[1]
     else:
         agregar_simbolo(p[1], 'ID', 'Variable como parámetro')
-        p[0] = p[1]  # Pasar el valor al nivel superior
+        p[0] = p[1]
 
 def p_error(p):
-    """Manejo de errores sintácticos mejorado con más seguridad"""
     try:
         if p:
             token_descripcion = obtener_descripcion_token(p.type, p.value)
             linea = getattr(p, 'lineno', 'desconocida')
-            print(f"Error de sintaxis en {token_descripcion} en línea {linea}")
             errores.append({
                 'line': linea,
                 'value': str(p.value) if p.value is not None else 'None',
@@ -651,7 +588,6 @@ def p_error(p):
                 'desc': f"Error de sintaxis: se encontró {token_descripcion}"
             })
         else:
-            print("Error de sintaxis: fin de archivo inesperado")
             errores.append({
                 'line': 'EOF',
                 'value': 'EOF',
@@ -659,7 +595,6 @@ def p_error(p):
                 'desc': "Error de sintaxis: fin de archivo inesperado"
             })
     except Exception as e:
-        print(f"Error en el manejo de errores sintácticos: {e}")
         errores.append({
             'line': 'desconocida',
             'value': 'error_interno',
@@ -668,77 +603,44 @@ def p_error(p):
         })
 
 def obtener_descripcion_token(tipo_token, valor_token):
-    """Convierte los tipos de tokens en descripciones más amigables"""
     descripciones = {
-        'TESIS': f'paréntesis de cierre ")"',
-        'PAREN': f'paréntesis de apertura "("',
-        'PC': f'punto y coma ";"',
-        'COMA': f'coma ","',
-        'MAS': f'operador suma "+"',
-        'MENOS': f'operador resta "-"',
-        'MUL': f'operador multiplicación "*"',
-        'DIV': f'operador división "/"',
-        'ASIG': f'operador de asignación ":="',
+        'TESIS': 'paréntesis de cierre ")"',
+        'PAREN': 'paréntesis de apertura "("',
+        'PC': 'punto y coma ";"',
         'ID': f'identificador "{valor_token}"',
         'CINT': f'número "{valor_token}"',
-        'CAD': f'cadena de texto {valor_token}',
-        'PROG': f'palabra clave "pf2024"',
-        'DECL': f'palabra clave "decl"',
-        'INICIO': f'palabra clave "Inicio"',
-        'FIN': f'palabra clave "Fin"',
-        'TIPO_INT': f'tipo de dato "Int"',
-        'TIPO_CAD': f'tipo de dato "Cad"',
-        'TIPO_BOOL': f'tipo de dato "Bool"',
-        'LEERDIG': f'función "leerdig"',
-        'IMPCAD': f'función "impcad"',
     }
-    
-    if tipo_token in descripciones:
-        return descripciones[tipo_token]
-    else:
-        return f'token {tipo_token} "{valor_token}"'
+    return descripciones.get(tipo_token, f'token {tipo_token}')
 
-# Construcción del analizador sintáctico
 parser = yacc.yacc()
 
-# ================= FUNCIONES PARA ÁRBOLES =================
+# ================= FUNCIONES PARA EVALUACIÓN =================
+
 def expresion_a_texto(nodo, precedencia_padre=0):
-    """Convierte un nodo del árbol a texto (infija)"""
     if nodo is None:
         return ""
-    
     precedencias = {'+': 1, '-': 1, '*': 2, '/': 2}
-    
     if nodo.tipo == 'operacion':
         precedencia_actual = precedencias.get(nodo.valor, 0)
-        
-        if nodo.izquierdo is None:  # Operador unario
+        if nodo.izquierdo is None:
             der_texto = expresion_a_texto(nodo.derecho, precedencia_actual)
             expresion = f"{nodo.valor}{der_texto}"
-        else:  # Operador binario
+        else:
             izq_texto = expresion_a_texto(nodo.izquierdo, precedencia_actual)
             der_texto = expresion_a_texto(nodo.derecho, precedencia_actual)
             expresion = f"{izq_texto} {nodo.valor} {der_texto}"
-        
         if precedencia_actual < precedencia_padre:
             expresion = f"({expresion})"
-        
         return expresion
-    elif nodo.tipo == 'termino':
+    elif nodo.tipo in ('termino', 'ID'):
         return str(nodo.valor)
-    elif nodo.tipo == 'ID':
-        return str(nodo.valor)
-    else:
-        return str(nodo.valor)
+    return str(nodo.valor)
 
 def imprimir_arbol_operacion(nodo, nivel=0):
-    """Imprime un árbol de operación de forma jerárquica"""
     if nodo is None:
         return ""
-    
     indentacion = "  " * nivel
     resultado = ""
-    
     if nodo.tipo == 'operacion':
         resultado += f"{indentacion}operacion: {nodo.valor}\n"
         if nodo.izquierdo:
@@ -749,130 +651,36 @@ def imprimir_arbol_operacion(nodo, nivel=0):
         resultado += f"{indentacion}termino: {nodo.valor}\n"
     elif nodo.tipo == 'ID':
         resultado += f"{indentacion}ID: {nodo.valor}\n"
-    
     return resultado
 
-# --- Nuevas utilidades: prefija, postfija, evaluación y cuádruplos ---
-
-def nodo_a_postfijo(nodo):
-    """Convierte un NodoOperacion a notación postfija (RPN)."""
-    if nodo is None:
-        return ""
-    if nodo.tipo == 'operacion':
-        # operador unario
-        if nodo.izquierdo is None:
-            return f"{nodo_a_postfijo(nodo.derecho)} {nodo.valor}".strip()
-        # binario
-        left = nodo_a_postfijo(nodo.izquierdo)
-        right = nodo_a_postfijo(nodo.derecho)
-        return f"{left} {right} {nodo.valor}".strip()
-    elif nodo.tipo in ('termino', 'ID'):
-        return str(nodo.valor)
-    else:
-        return str(nodo.valor)
-
-def nodo_a_prefijo(nodo):
-    """Convierte un NodoOperacion a notación prefija."""
-    if nodo is None:
-        return ""
-    if nodo.tipo == 'operacion':
-        # operador unario
-        if nodo.izquierdo is None:
-            return f"{nodo.valor} {nodo_a_prefijo(nodo.derecho)}".strip()
-        # binario
-        left = nodo_a_prefijo(nodo.izquierdo)
-        right = nodo_a_prefijo(nodo.derecho)
-        return f"{nodo.valor} {left} {right}".strip()
-    elif nodo.tipo in ('termino', 'ID'):
-        return str(nodo.valor)
-    else:
-        return str(nodo.valor)
-
 def evaluar_nodo(nodo):
-    """
-    Evalúa recursivamente un NodoOperacion.
-    Devuelve (valor, tipo) o (None, None) si no pudo evaluarse (y agrega errores semánticos).
-    """
     if nodo is None:
         return None, None
-
-    # Constante entera
     if nodo.tipo == 'termino':
         try:
             v = int(nodo.valor)
             return v, 'Int'
         except Exception:
             return None, None
-
-    # Identificador -> buscar variable
     if nodo.tipo == 'ID':
         nombre = nodo.valor
         var = analizador_sem.variables.get(nombre)
-        if var is None:
-            # variable no declarada (ya manejado antes, pero robustecemos)
-            error = ErrorSemantico(
-                linea=nodo.linea,
-                tipo="VARIABLE_NO_DECLARADA",
-                descripcion=f"La variable '{nombre}' no ha sido declarada",
-                contexto=f"Uso en expresión",
-                sugerencia=f"Declare la variable '{nombre}' antes de usarla"
-            )
-            errores_semanticos.append(error)
-            return None, None
-        if not var.inicializada:
-            error = ErrorSemantico(
-                linea=nodo.linea,
-                tipo="VARIABLE_NO_INICIALIZADA",
-                descripcion=f"La variable '{nombre}' se usa sin inicializar",
-                contexto=f"Uso en expresión",
-                sugerencia=f"Asigne un valor a '{nombre}' antes de usarla"
-            )
-            errores_semanticos.append(error)
+        if var is None or not var.inicializada:
             return None, None
         return var.valor, var.tipo
-
-    # Operación (unaria o binaria)
     if nodo.tipo == 'operacion':
         op = nodo.valor
-        # Unario
         if nodo.izquierdo is None:
-            # evaluar derecho
             rv, rt = evaluar_nodo(nodo.derecho)
-            if rv is None:
-                return None, None
-            if rt != 'Int':
-                error = ErrorSemantico(
-                    linea=nodo.linea,
-                    tipo="OPERACION_TIPO_INVALIDO",
-                    descripcion=f"Operador unario '{op}' no válido para tipo '{rt}'",
-                    contexto=f"Operación unaria en línea {nodo.linea}",
-                    sugerencia="Use operandos numéricos para operaciones aritméticas"
-                )
-                errores_semanticos.append(error)
+            if rv is None or rt != 'Int':
                 return None, None
             if op == '-':
                 return -rv, 'Int'
-            # Otros unarios si se añaden
             return None, None
-
-        # Binario
         lv, lt = evaluar_nodo(nodo.izquierdo)
         rv, rt = evaluar_nodo(nodo.derecho)
-        if lv is None or rv is None:
+        if lv is None or rv is None or lt != 'Int' or rt != 'Int':
             return None, None
-
-        # actualmente sólo Ints para aritmética
-        if lt != 'Int' or rt != 'Int':
-            error = ErrorSemantico(
-                linea=nodo.linea,
-                tipo="OPERACION_TIPO_INVALIDO",
-                descripcion=f"Operación '{op}' no válida para tipos '{lt}' y '{rt}'",
-                contexto=f"Operación binaria en línea {nodo.linea}",
-                sugerencia="Use operandos de tipo 'Int' en operaciones aritméticas"
-            )
-            errores_semanticos.append(error)
-            return None, None
-
         try:
             if op == '+':
                 return lv + rv, 'Int'
@@ -882,68 +690,32 @@ def evaluar_nodo(nodo):
                 return lv * rv, 'Int'
             elif op == '/':
                 if rv == 0:
-                    error = ErrorSemantico(
-                        linea=nodo.linea,
-                        tipo="DIVISION_POR_CERO",
-                        descripcion="División por cero detectada en tiempo de evaluación",
-                        contexto=f"División en línea {nodo.linea}",
-                        sugerencia="Asegúrese de que el divisor no sea cero"
-                    )
-                    errores_semanticos.append(error)
                     return None, None
-                return lv // rv, 'Int'  # división entera; cambia si deseas float
-            else:
-                return None, None
-        except Exception as e:
-            error = ErrorSemantico(
-                linea=nodo.linea,
-                tipo="ERROR_EVALUACION",
-                descripcion=f"Error al evaluar operación: {e}",
-                contexto=f"Operación en línea {nodo.linea}",
-                sugerencia="Revise los operandos"
-            )
-            errores_semanticos.append(error)
+                return lv // rv, 'Int'
+        except Exception:
             return None, None
-
-    # por defecto
     return None, None
 
-# --- Generación de cuádruplos (cuadruples) ---
-
 def nuevo_temp():
-    """Devuelve nombre temporal nuevo tipo t1, t2, ..."""
     global temp_counter
     temp_counter += 1
     return f"t{temp_counter}"
 
 def generar_cuadruplos_desde_nodo(nodo, quads=None):
-    """
-    Recorre el AST y genera cuádruplos en formato (operador, arg1, arg2, resultado).
-    Devuelve (nombre_operando_resultante, lista_de_cuadruplos).
-    """
     if quads is None:
         quads = []
-
     if nodo is None:
         return None, quads
-
-    # término (constante entera)
     if nodo.tipo == 'termino':
         return nodo.valor, quads
-
-    # identificador -> usar su nombre como operando
     if nodo.tipo == 'ID':
         return nodo.valor, quads
-
-    # operación unaria
     if nodo.tipo == 'operacion' and nodo.izquierdo is None:
         op = nodo.valor
         operando_d, quads = generar_cuadruplos_desde_nodo(nodo.derecho, quads)
         t = nuevo_temp()
         quads.append((op, operando_d, None, t))
         return t, quads
-
-    # operación binaria
     if nodo.tipo == 'operacion':
         op = nodo.valor
         left_operand, quads = generar_cuadruplos_desde_nodo(nodo.izquierdo, quads)
@@ -951,35 +723,24 @@ def generar_cuadruplos_desde_nodo(nodo, quads=None):
         t = nuevo_temp()
         quads.append((op, left_operand, right_operand, t))
         return t, quads
-
-    # por defecto
     return None, quads
 
 def generar_arboles_texto():
-    """Genera el texto completo de todos los árboles de operaciones
-       e incluye notaciones: infija, postfija (RPN) y prefija."""
     if not arboles_operaciones:
         return "No se encontraron operaciones aritméticas en el código."
-    
     resultado = ""
     for i, operacion in enumerate(arboles_operaciones, 1):
         nodo = operacion['expresion']
-        expresion_texto = expresion_a_texto(nodo)  # infija (con paréntesis si aplica)
-        postfix = nodo_a_postfijo(nodo)
-        prefix = nodo_a_prefijo(nodo)
+        expresion_texto = expresion_a_texto(nodo)
         resultado += f"=== Operación {i}: {operacion['variable']} := {expresion_texto} ===\n"
         resultado += f"Línea: {operacion.get('linea', 'N/A')}\n\n"
-        resultado += f"Notación infija:   {expresion_texto}\n"
-        resultado += f"Notación postfija: {postfix}\n"
-        resultado += f"Notación prefija:  {prefix}\n\n"
+        resultado += f"Expresión: {expresion_texto}\n\n"
         resultado += f"Árbol sintáctico:\n"
         resultado += imprimir_arbol_operacion(nodo)
         resultado += "\n" + "="*60 + "\n\n"
-    
     return resultado
 
 def generar_resultados_texto():
-    """Genera la sección de resultados: operaciones evaluadas y tabla de variables con valores."""
     resultado = ""
     if not arboles_operaciones:
         resultado += "No hay operaciones para evaluar.\n\n"
@@ -989,193 +750,186 @@ def generar_resultados_texto():
         for i, op in enumerate(arboles_operaciones, 1):
             nodo = op['expresion']
             infija = expresion_a_texto(nodo)
-            postfix = nodo_a_postfijo(nodo)
-            prefix = nodo_a_prefijo(nodo)
             res = op.get('resultado')
-            tipo_res = op.get('tipo_resultado') or '-'
             resultado += f"{op['variable']} := {infija}\n"
             resultado += f"  Resultado: {res if res is not None else 'No evaluable'}\n"
-            # Mostrar cuadruplos si existen
             resultado += "-"*40 + "\n"
         resultado += "\n"
-
-    # Tabla de variables con valores
     resultado += "TABLA DE VARIABLES (VALORES)\n"
     resultado += "="*30 + "\n"
     if analizador_sem.variables:
         resultado += f"{'Variable':<12} {'Tipo':<6} {'Inicializada':<12} {'Valor'}\n"
         resultado += "-"*50 + "\n"
         for nombre, var in analizador_sem.variables.items():
-            ini = "Sí" if var.inicializada else "No"
+            ini = "Si" if var.inicializada else "No"
             resultado += f"{nombre:<12} {var.tipo:<6} {ini:<12} {var.valor if var.valor is not None else '-'}\n"
     else:
         resultado += "No se declararon variables.\n"
-
     return resultado
 
 def generar_reporte_semantico():
-    """Genera un reporte completo del análisis semántico"""
     if not errores_semanticos and not analizador_sem.variables:
         return "No se realizó análisis semántico."
-    
     resultado = "REPORTE DE ANÁLISIS SEMÁNTICO\n"
     resultado += "="*50 + "\n\n"
-    
-    # 1. Tabla de variables
     resultado += "1. TABLA DE VARIABLES DECLARADAS:\n"
     resultado += "-"*40 + "\n"
     if analizador_sem.variables:
-        resultado += f"{'Variable':<15} {'Tipo':<8} {'Línea':<6} {'Inicial.':<8} {'Usada':<6} {'Líneas Uso'}\n"
+        resultado += f"{'Variable':<15} {'Tipo':<8} {'Línea':<6} {'Inicial.':<8} {'Usada':<6}\n"
         resultado += "-"*70 + "\n"
         for nombre, var in analizador_sem.variables.items():
-            inicializada = "Sí" if var.inicializada else "No"
-            usada = "Sí" if var.usada else "No"
-            lineas_uso = ", ".join(map(str, var.lineas_uso)) if var.lineas_uso else "-"
-            resultado += f"{nombre:<15} {var.tipo:<8} {var.linea_declaracion:<6} {inicializada:<8} {usada:<6} {lineas_uso}\n"
+            inicializada = "Si" if var.inicializada else "No"
+            usada = "Si" if var.usada else "No"
+            resultado += f"{nombre:<15} {var.tipo:<8} {var.linea_declaracion:<6} {inicializada:<8} {usada:<6}\n"
     else:
         resultado += "No se encontraron variables declaradas.\n"
-    
     resultado += "\n"
-    
-    # 2. Estadísticas
     resultado += "2. ESTADÍSTICAS:\n"
     resultado += "-"*20 + "\n"
     resultado += f"Variables declaradas: {len(analizador_sem.variables)}\n"
     resultado += f"Variables utilizadas: {len(analizador_sem.variables_utilizadas)}\n"
-    resultado += f"Variables no utilizadas: {len(analizador_sem.variables_declaradas - analizador_sem.variables_utilizadas)}\n"
-    resultado += f"Errores semánticos encontrados: {len(errores_semanticos)}\n\n"
-    
-    # 3. Errores semánticos detallados
+    resultado += f"Errores semánticos: {len(errores_semanticos)}\n\n"
     if errores_semanticos:
-        resultado += "3. ERRORES SEMÁNTICOS DETALLADOS:\n"
+        resultado += "3. ERRORES SEMÁNTICOS:\n"
         resultado += "-"*35 + "\n"
         for i, error in enumerate(errores_semanticos, 1):
             resultado += f"Error #{i}:\n"
-            resultado += f"  📍 Línea: {error.linea}\n"
-            resultado += f"  🏷️  Tipo: {error.tipo}\n"
-            resultado += f"  📝 Descripción: {error.descripcion}\n"
-            resultado += f"  📄 Contexto: {error.contexto}\n"
-            if error.sugerencia:
-                resultado += f"  💡 Sugerencia: {error.sugerencia}\n"
-            resultado += "\n" + "-"*50 + "\n"
+            resultado += f"  Línea: {error.linea}\n"
+            resultado += f"  Tipo: {error.tipo}\n"
+            resultado += f"  Descripción: {error.descripcion}\n\n"
     else:
-        resultado += "3. ERRORES SEMÁNTICOS:\n"
-        resultado += "-"*20 + "\n"
-        resultado += "✅ No se encontraron errores semánticos.\n\n"
-    
+        resultado += "3. No se encontraron errores semánticos.\n\n"
     return resultado
 
-# ================= INTERFAZ GRÁFICA MEJORADA =================
+def generar_codigo_fuente():
+    if not cuadruplos_globales:
+        return "No se generaron cuádruplos.\n"
+    resultado = "GENERACIÓN DE CÓDIGO FUENTE\n"
+    resultado += "="*60 + "\n\n"
+    resultado += "CUÁDRUPLOS GENERADOS:\n"
+    resultado += "-"*60 + "\n"
+    resultado += f"{'#':<4} {'Operador':<10} {'Arg1':<12} {'Arg2':<12} {'Resultado':<12}\n"
+    resultado += "-"*60 + "\n"
+    for i, cuad in enumerate(cuadruplos_globales, 1):
+        op, arg1, arg2, res = cuad
+        arg1_str = str(arg1) if arg1 is not None else '-'
+        arg2_str = str(arg2) if arg2 is not None else '-'
+        res_str = str(res) if res is not None else '-'
+        resultado += f"{i:<4} {op:<10} {arg1_str:<12} {arg2_str:<12} {res_str:<12}\n"
+    resultado += "\n" + "="*60 + "\n\n"
+    resultado += "CÓDIGO ENSAMBLADOR EQUIVALENTE (x86):\n"
+    resultado += "-"*60 + "\n"
+    for i, cuad in enumerate(cuadruplos_globales, 1):
+        op, arg1, arg2, res = cuad
+        resultado += f"; Cuádruplo {i}\n"
+        if op == ':=':
+            resultado += f"MOV {res}, {arg1}\n"
+        elif op == '+':
+            resultado += f"MOV EAX, {arg1}\n"
+            resultado += f"ADD EAX, {arg2}\n"
+            resultado += f"MOV {res}, EAX\n"
+        elif op == '-':
+            if arg2 is None:
+                resultado += f"MOV EAX, {arg1}\n"
+                resultado += f"NEG EAX\n"
+                resultado += f"MOV {res}, EAX\n"
+            else:
+                resultado += f"MOV EAX, {arg1}\n"
+                resultado += f"SUB EAX, {arg2}\n"
+                resultado += f"MOV {res}, EAX\n"
+        elif op == '*':
+            resultado += f"MOV EAX, {arg1}\n"
+            resultado += f"IMUL EAX, {arg2}\n"
+            resultado += f"MOV {res}, EAX\n"
+        elif op == '/':
+            resultado += f"MOV EAX, {arg1}\n"
+            resultado += f"CDQ\n"
+            resultado += f"IDIV {arg2}\n"
+            resultado += f"MOV {res}, EAX\n"
+        elif op == 'impcad':
+            resultado += f"PUSH {arg1}\n"
+            resultado += f"CALL print_string\n"
+        elif op == 'leerdig':
+            resultado += f"CALL read_int\n"
+            resultado += f"MOV {res}, EAX\n"
+        resultado += "\n"
+    return resultado
+
+# ================= INTERFAZ GRÁFICA =================
 class AnalizadorGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Analizador Semántico PF2024 - Completo con Errores Detallados")
+        self.root.title("Analizador Completo con Generación de Código - PF2024")
         self.root.geometry("1600x1000")
-        
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
-        
         self.frame_principal = ttk.Frame(self.notebook)
         self.notebook.add(self.frame_principal, text="Análisis Principal")
-        
         self.frame_arbol = ttk.Frame(self.notebook)
         self.notebook.add(self.frame_arbol, text="Árboles de Operaciones")
-        
         self.frame_semantico = ttk.Frame(self.notebook)
         self.notebook.add(self.frame_semantico, text="Análisis Semántico")
-        
-        # Nueva pestaña para resultados
         self.frame_resultados = ttk.Frame(self.notebook)
         self.notebook.add(self.frame_resultados, text="Resultados")
-        
+        self.frame_generacion = ttk.Frame(self.notebook)
+        self.notebook.add(self.frame_generacion, text="Generación de Código")
         self.crear_interfaz_principal()
         self.crear_interfaz_arbol()
         self.crear_interfaz_semantico()
         self.crear_interfaz_resultados()
+        self.crear_interfaz_generacion()
     
     def crear_interfaz_principal(self):
         main_frame = ttk.Frame(self.frame_principal, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
         ttk.Label(main_frame, text="Código fuente:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
         self.codigo_text = scrolledtext.ScrolledText(main_frame, height=15, width=80)
         self.codigo_text.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        
-        # Código de ejemplo con errores semánticos para demostrar
         codigo_ejemplo = '''pf2024 programa
-/* Ejemplo con errores semánticos para demostración */
+decl
+Int a, b, resultado;
+Cad mensaje;
 
-decl    /* Declaración de variables */
-
-Int a, b, c, resultado, noUsada;
-Cad mensaje, otraCad;
-Bool flag;
-Int a;  // Error: variable duplicada
-
-Inicio    /* Cuerpo del programa */
+Inicio
 a := 5;
 b := 3;
-resultado := a + b * c;  // Error: 'c' no inicializada
-d := a + b;  // Error: 'd' no declarada
-mensaje := a;  // Error: incompatibilidad de tipos
-impcad("Resultado:");
-impcad(resultado);  // Error: tipo incorrecto para impcad
-leerdig(mensaje);  // Error: tipo incorrecto para leerdig
-division := a / 0;  // Error: división por cero
-leerdig(nuevaVar);  // Error: variable no declarada
+resultado := a + b * 2;
+mensaje := "Hola Mundo";
+impcad(mensaje);
+leerdig(a);
 Fin'''
-        
         self.codigo_text.insert('1.0', codigo_ejemplo)
-        
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=2, column=0, columnspan=2, pady=(0, 10))
-        
         ttk.Button(button_frame, text="Analizar", command=self.analizar).pack(side=tk.LEFT, padx=(0, 10))
         ttk.Button(button_frame, text="Limpiar", command=self.limpiar_todo).pack(side=tk.LEFT, padx=(0, 10))
         ttk.Button(button_frame, text="Cargar Archivo", command=self.cargar_archivo).pack(side=tk.LEFT)
-        
         ttk.Label(main_frame, text="Tabla de Símbolos:").grid(row=3, column=0, sticky=tk.W, pady=(10, 5))
-        
         columns = ('No.', 'Lexema', 'Token', 'Referencia')
         self.tabla_tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=12)
-        
         for col in columns:
             self.tabla_tree.heading(col, text=col)
             self.tabla_tree.column(col, width=150)
-        
         self.tabla_tree.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E))
-        
         scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=self.tabla_tree.yview)
         scrollbar.grid(row=4, column=2, sticky=(tk.N, tk.S))
         self.tabla_tree.configure(yscrollcommand=scrollbar.set)
-        
-        ttk.Label(main_frame, text="Mensajes:").grid(row=5, column=0, sticky=tk.W, pady=(10, 5))
-        self.mensajes_text = scrolledtext.ScrolledText(main_frame, height=4, width=80)
-        self.mensajes_text.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E))
-        
-        ttk.Label(main_frame, text="Errores Léxicos y Sintácticos:").grid(row=7, column=0, sticky=tk.W, pady=(10, 5))
-        self.errores_text = scrolledtext.ScrolledText(main_frame, height=6, width=80)
-        self.errores_text.grid(row=8, column=0, columnspan=2, sticky=(tk.W, tk.E))
-        
+        ttk.Label(main_frame, text="Errores:").grid(row=5, column=0, sticky=tk.W, pady=(10, 5))
+        self.errores_text = scrolledtext.ScrolledText(main_frame, height=10, width=80)
+        self.errores_text.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E))
         self.frame_principal.columnconfigure(0, weight=1)
         self.frame_principal.rowconfigure(0, weight=1)
         main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(1, weight=1)
-        main_frame.rowconfigure(4, weight=1)
     
     def crear_interfaz_arbol(self):
         arbol_frame = ttk.Frame(self.frame_arbol, padding="10")
         arbol_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        ttk.Label(arbol_frame, text="Árboles de Operaciones Aritméticas:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
-        
+        ttk.Label(arbol_frame, text="Árboles de Operaciones:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
         self.arbol_text = scrolledtext.ScrolledText(arbol_frame, height=40, width=120, font=('Courier', 10))
         self.arbol_text.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
         scrollbar_arbol = ttk.Scrollbar(arbol_frame, orient=tk.VERTICAL, command=self.arbol_text.yview)
         scrollbar_arbol.grid(row=1, column=1, sticky=(tk.N, tk.S))
         self.arbol_text.configure(yscrollcommand=scrollbar_arbol.set)
-        
         self.frame_arbol.columnconfigure(0, weight=1)
         self.frame_arbol.rowconfigure(0, weight=1)
         arbol_frame.columnconfigure(0, weight=1)
@@ -1184,246 +938,114 @@ Fin'''
     def crear_interfaz_semantico(self):
         sem_frame = ttk.Frame(self.frame_semantico, padding="10")
         sem_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        ttk.Label(sem_frame, text="Reporte de Análisis Semántico:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
-        
-        self.semantico_text = scrolledtext.ScrolledText(sem_frame, height=35, width=120, font=('Courier', 10))
+        ttk.Label(sem_frame, text="Análisis Semántico:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+        self.semantico_text = scrolledtext.ScrolledText(sem_frame, height=40, width=120, font=('Courier', 10))
         self.semantico_text.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
         scrollbar_sem = ttk.Scrollbar(sem_frame, orient=tk.VERTICAL, command=self.semantico_text.yview)
         scrollbar_sem.grid(row=1, column=1, sticky=(tk.N, tk.S))
         self.semantico_text.configure(yscrollcommand=scrollbar_sem.set)
-        
-        # Frame para errores semánticos específicos
-        ttk.Label(sem_frame, text="Errores Semánticos Detallados:").grid(row=2, column=0, sticky=tk.W, pady=(10, 5))
-        
-        self.errores_sem_text = scrolledtext.ScrolledText(sem_frame, height=15, width=120, font=('Courier', 9))
-        self.errores_sem_text.grid(row=3, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        scrollbar_err_sem = ttk.Scrollbar(sem_frame, orient=tk.VERTICAL, command=self.errores_sem_text.yview)
-        scrollbar_err_sem.grid(row=3, column=1, sticky=(tk.N, tk.S))
-        self.errores_sem_text.configure(yscrollcommand=scrollbar_err_sem.set)
-        
         self.frame_semantico.columnconfigure(0, weight=1)
         self.frame_semantico.rowconfigure(0, weight=1)
         sem_frame.columnconfigure(0, weight=1)
-        sem_frame.rowconfigure(1, weight=2)
-        sem_frame.rowconfigure(3, weight=1)
+        sem_frame.rowconfigure(1, weight=1)
     
     def crear_interfaz_resultados(self):
         res_frame = ttk.Frame(self.frame_resultados, padding="10")
         res_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-
-        ttk.Label(res_frame, text="Resultados de Operaciones:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+        ttk.Label(res_frame, text="Resultados:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
         self.resultados_text = scrolledtext.ScrolledText(res_frame, height=40, width=120, font=('Courier', 10))
         self.resultados_text.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-
         scrollbar_res = ttk.Scrollbar(res_frame, orient=tk.VERTICAL, command=self.resultados_text.yview)
         scrollbar_res.grid(row=1, column=1, sticky=(tk.N, tk.S))
         self.resultados_text.configure(yscrollcommand=scrollbar_res.set)
-
         self.frame_resultados.columnconfigure(0, weight=1)
         self.frame_resultados.rowconfigure(0, weight=1)
         res_frame.columnconfigure(0, weight=1)
         res_frame.rowconfigure(1, weight=1)
+    
+    def crear_interfaz_generacion(self):
+        gen_frame = ttk.Frame(self.frame_generacion, padding="10")
+        gen_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        ttk.Label(gen_frame, text="Generación de Código:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+        self.generacion_text = scrolledtext.ScrolledText(gen_frame, height=40, width=120, font=('Courier', 10))
+        self.generacion_text.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        scrollbar_gen = ttk.Scrollbar(gen_frame, orient=tk.VERTICAL, command=self.generacion_text.yview)
+        scrollbar_gen.grid(row=1, column=1, sticky=(tk.N, tk.S))
+        self.generacion_text.configure(yscrollcommand=scrollbar_gen.set)
+        self.frame_generacion.columnconfigure(0, weight=1)
+        self.frame_generacion.rowconfigure(0, weight=1)
+        gen_frame.columnconfigure(0, weight=1)
+        gen_frame.rowconfigure(1, weight=1)
 
     def analizar(self):
-        global tabla_simbolos, contador_simbolos, errores, errores_semanticos, arboles_operaciones, lineas_codigo
-        
-        # Reiniciar datos
         reiniciar_datos()
-        
-        # Limpiar interfaces
-        self.mensajes_text.delete('1.0', tk.END)
         self.errores_text.delete('1.0', tk.END)
         self.arbol_text.delete('1.0', tk.END)
         self.semantico_text.delete('1.0', tk.END)
-        self.errores_sem_text.delete('1.0', tk.END)
         self.resultados_text.delete('1.0', tk.END)
-        
+        self.generacion_text.delete('1.0', tk.END)
         codigo = self.codigo_text.get('1.0', tk.END)
+        global lineas_codigo
         lineas_codigo = codigo.split('\n')
-        
         try:
-            # Reiniciar lexer
-            self.reiniciar_lexer()
-            
-            # Análisis léxico
-            analizador_lexico.input(codigo)
-            
-            # Análisis sintáctico y semántico
             self.reiniciar_lexer()
             analizador_lexico.input(codigo)
-            resultado = parser.parse(lexer=analizador_lexico)
-            
-            # Actualizar interfaces
+            self.reiniciar_lexer()
+            analizador_lexico.input(codigo)
+            parser.parse(lexer=analizador_lexico)
             self.actualizar_tabla()
-            
-            # Árboles de operaciones
-            arboles_texto = generar_arboles_texto()
-            self.arbol_text.insert('1.0', arboles_texto)
-            
-            # Resultados (nueva pestaña)
-            resultados_texto = generar_resultados_texto()
-            self.resultados_text.insert('1.0', resultados_texto)
-            
-            # Reporte semántico
-            reporte_semantico = generar_reporte_semantico()
-            self.semantico_text.insert('1.0', reporte_semantico)
-            
-            # Errores semánticos detallados
-            self.mostrar_errores_semanticos_detallados()
-            
-            # Mensajes de resumen
-            total_errores = len(errores) + len(errores_semanticos)
-            self.mensajes_text.insert(tk.END, "✅ Análisis completado.\n")
-            self.mensajes_text.insert(tk.END, f"📊 Símbolos encontrados: {len(tabla_simbolos)}\n")
-            self.mensajes_text.insert(tk.END, f"🧮 Operaciones aritméticas: {len(arboles_operaciones)}\n")
-            self.mensajes_text.insert(tk.END, f"🔍 Variables declaradas: {len(analizador_sem.variables)}\n")
-            self.mensajes_text.insert(tk.END, f"⚠️  Total de errores: {total_errores}\n")
-            self.mensajes_text.insert(tk.END, f"   - Léxicos/Sintácticos: {len(errores)}\n")
-            self.mensajes_text.insert(tk.END, f"   - Semánticos: {len(errores_semanticos)}\n")
-            
-            # Errores léxicos y sintácticos
+            self.arbol_text.insert('1.0', generar_arboles_texto())
+            self.resultados_text.insert('1.0', generar_resultados_texto())
+            self.semantico_text.insert('1.0', generar_reporte_semantico())
+            self.generacion_text.insert('1.0', generar_codigo_fuente())
             if errores:
-                self.errores_text.insert(tk.END, "❌ Errores Léxicos y Sintácticos:\n")
-                self.errores_text.insert(tk.END, "="*50 + "\n")
-                
+                self.errores_text.insert(tk.END, "ERRORES ENCONTRADOS:\n" + "="*50 + "\n")
                 for i, error in enumerate(errores, 1):
-                    linea_num = error['line']
-                    
-                    self.errores_text.insert(tk.END, f"Error #{i}:\n")
-                    self.errores_text.insert(tk.END, f"  📍 Línea {linea_num}: {error['type']}\n")
-                    
-                    if 'desc' in error:
-                        self.errores_text.insert(tk.END, f"  📝 Descripción: {error['desc']}\n")
-                    
-                    if isinstance(linea_num, int) and 1 <= linea_num <= len(lineas_codigo):
-                        contexto = lineas_codigo[linea_num - 1].strip()
-                        if contexto:
-                            self.errores_text.insert(tk.END, f"  📄 Código: {contexto}\n")
-                    
-                    self.errores_text.insert(tk.END, "-"*30 + "\n")
+                    self.errores_text.insert(tk.END, f"Error #{i}: Línea {error['line']}\n")
+                    self.errores_text.insert(tk.END, f"  {error['desc']}\n\n")
             else:
-                self.errores_text.insert(tk.END, "✅ No se encontraron errores léxicos o sintácticos.")
-
+                self.errores_text.insert(tk.END, "No se encontraron errores.\n")
         except Exception as e:
-            self.mensajes_text.insert(tk.END, f"❌ Error durante el análisis: {str(e)}\n")
-            import traceback
-            self.mensajes_text.insert(tk.END, f"Detalles: {traceback.format_exc()}\n")
-    
-    def mostrar_errores_semanticos_detallados(self):
-        """Muestra errores semánticos con formato detallado y coloreado"""
-        if not errores_semanticos:
-            self.errores_sem_text.insert(tk.END, "✅ No se encontraron errores semánticos.\n")
-            return
-        
-        self.errores_sem_text.insert(tk.END, "❌ ERRORES SEMÁNTICOS DETALLADOS\n")
-        self.errores_sem_text.insert(tk.END, "="*70 + "\n\n")
-        
-        # Agrupar errores por tipo
-        errores_por_tipo = {}
-        for error in errores_semanticos:
-            if error.tipo not in errores_por_tipo:
-                errores_por_tipo[error.tipo] = []
-            errores_por_tipo[error.tipo].append(error)
-        
-        # Mostrar resumen por tipo
-        self.errores_sem_text.insert(tk.END, "📊 RESUMEN POR TIPO DE ERROR:\n")
-        self.errores_sem_text.insert(tk.END, "-"*40 + "\n")
-        for tipo, lista_errores in errores_por_tipo.items():
-            self.errores_sem_text.insert(tk.END, f"• {tipo}: {len(lista_errores)} error(es)\n")
-        self.errores_sem_text.insert(tk.END, "\n")
-        
-        # Mostrar errores detallados
-        for i, error in enumerate(errores_semanticos, 1):
-            self.errores_sem_text.insert(tk.END, f"🚨 ERROR SEMÁNTICO #{i}\n")
-            self.errores_sem_text.insert(tk.END, f"{'='*50}\n")
-            self.errores_sem_text.insert(tk.END, f"📍 UBICACIÓN:\n")
-            self.errores_sem_text.insert(tk.END, f"   Línea: {error.linea}\n")
-            
-            # Mostrar código de la línea si está disponible
-            if isinstance(error.linea, int) and 1 <= error.linea <= len(lineas_codigo):
-                codigo_linea = lineas_codigo[error.linea - 1].strip()
-                if codigo_linea:
-                    self.errores_sem_text.insert(tk.END, f"   Código: {codigo_linea}\n")
-            
-            self.errores_sem_text.insert(tk.END, f"\n🏷️  CLASIFICACIÓN:\n")
-            self.errores_sem_text.insert(tk.END, f"   Tipo: {error.tipo}\n")
-            
-            self.errores_sem_text.insert(tk.END, f"\n📝 DESCRIPCIÓN:\n")
-            self.errores_sem_text.insert(tk.END, f"   {error.descripcion}\n")
-            
-            self.errores_sem_text.insert(tk.END, f"\n📄 CONTEXTO:\n")
-            self.errores_sem_text.insert(tk.END, f"   {error.contexto}\n")
-            
-            if error.sugerencia:
-                self.errores_sem_text.insert(tk.END, f"\n💡 SUGERENCIA:\n")
-                self.errores_sem_text.insert(tk.END, f"   {error.sugerencia}\n")
-            
-            self.errores_sem_text.insert(tk.END, f"\n{'='*50}\n\n")
+            self.errores_text.insert(tk.END, f"Error: {str(e)}\n")
     
     def actualizar_tabla(self):
         for item in self.tabla_tree.get_children():
             self.tabla_tree.delete(item)
-        
         for simbolo in tabla_simbolos:
             self.tabla_tree.insert('', 'end', values=(
-                simbolo.numero,
-                simbolo.lexema,
-                simbolo.token,
-                simbolo.referencia or ''
+                simbolo.numero, simbolo.lexema, simbolo.token, simbolo.referencia or ''
             ))
     
     def limpiar_todo(self):
-        global tabla_simbolos, contador_simbolos, errores, errores_semanticos, arboles_operaciones, lineas_codigo
-        
         reiniciar_datos()
-        
         self.actualizar_tabla()
-        self.mensajes_text.delete('1.0', tk.END)
         self.errores_text.delete('1.0', tk.END)
         self.arbol_text.delete('1.0', tk.END)
         self.semantico_text.delete('1.0', tk.END)
-        self.errores_sem_text.delete('1.0', tk.END)
         self.resultados_text.delete('1.0', tk.END)
-        
-        self.mensajes_text.insert(tk.END, "🗑️ Todos los datos han sido limpiados.\n")
+        self.generacion_text.delete('1.0', tk.END)
     
     def cargar_archivo(self):
         file_path = filedialog.askopenfilename(
-            title="Seleccionar archivo de código fuente",
-            filetypes=[
-                ("Archivos PF2024", "*.pf"),
-                ("Archivos de texto", "*.txt"), 
-                ("Todos los archivos", "*.*")
-            ]
+            title="Seleccionar archivo",
+            filetypes=[("Archivos PF2024", "*.pf"), ("Todos", "*.*")]
         )
-        
         if file_path:
             try:
                 with open(file_path, 'r', encoding='utf-8') as file:
-                    contenido = file.read()
                     self.codigo_text.delete('1.0', tk.END)
-                    self.codigo_text.insert('1.0', contenido)
-                    self.mensajes_text.delete('1.0', tk.END)
-                    self.mensajes_text.insert(tk.END, f"📁 Archivo cargado exitosamente: {file_path}\n")
+                    self.codigo_text.insert('1.0', file.read())
             except Exception as e:
-                self.mensajes_text.insert(tk.END, f"❌ Error al cargar el archivo: {str(e)}\n")
+                self.errores_text.insert(tk.END, f"Error al cargar: {str(e)}\n")
 
     def reiniciar_lexer(self):
-        """Reinicia el lexer y su contador de líneas"""
-        global analizador_lexico
         analizador_lexico.lineno = 1
         analizador_lexico.lexpos = 0
 
-# ================= EJECUCIÓN PRINCIPAL =================
 if __name__ == "__main__":
     print("="*70)
-    print("ANALIZADOR SEMÁNTICO PF2024 - VERSIÓN COMPLETA")
-    print("Incluye detección avanzada de errores semánticos y generación de cuádruplos")
+    print("ANALIZADOR COMPLETO CON GENERACIÓN DE CÓDIGO - PF2024")
     print("="*70)
-    
     root = tk.Tk()
     app = AnalizadorGUI(root)
     root.mainloop()
