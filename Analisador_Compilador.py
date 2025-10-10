@@ -506,35 +506,63 @@ def p_expresion_factor(p):
 
 def p_llamada_funcion(p):
     '''llamada_funcion : IMPCAD PAREN parametro TESIS PC
+                      | IMPDIG PAREN parametro TESIS PC
                       | LEERDIG PAREN ID TESIS PC'''
     linea = obtener_linea_actual(p)
     
-    if p[1] == 'impcad':
-        agregar_simbolo('impcad', 'IMPCAD', 'Función imprimir cadena')
+    if p[1] in ('impcad', 'impdig'):
+        token = 'IMPCAD' if p[1] == 'impcad' else 'IMPDIG'
+        descripcion = 'Función imprimir cadena' if p[1] == 'impcad' else 'Función imprimir dígito'
+        agregar_simbolo(p[1], token, descripcion)
+    
         param = p[3] if p[3] else "None"
-        cuadruplos_globales.append(('impcad', param, None, None))
+        cuadruplos_globales.append((p[1], param, None, None))
+
+        if p[1] == 'impdig':
+            if p[3] is not None:
+                if not (isinstance(p[3], str) and p[3].startswith('"') and p[3].endswith('"')):
+                    variable = analizador_sem.usar_variable(p[3], linea)
+                    if variable and variable.tipo != 'Int':
+                        error = ErrorSemantico(
+                            linea=linea,
+                            tipo="PARAMETRO_TIPO_INCORRECTO",
+                            descripcion=f"La función 'impdig' requiere parámetro de tipo 'Int'",
+                            contexto=f"Se pasó variable '{p[3]}' de tipo '{variable.tipo}' a función 'impdig'",
+                            sugerencia="Use una variable de tipo 'Int' o un número entero"
+                        )
+                        errores_semanticos.append(error)
+            else:
+                error = ErrorSemantico(
+                    linea=linea,
+                    tipo="PARAMETRO_FALTANTE",
+                    descripcion="La función 'impdig' requiere un parámetro",
+                    contexto="Llamada a 'impdig' sin parámetro",
+                    sugerencia="Proporcione un número entero o variable de tipo 'Int'"
+                )
+                errores_semanticos.append(error)
         
-        if p[3] is not None:
-            if not (isinstance(p[3], str) and p[3].startswith('"') and p[3].endswith('"')):
-                variable = analizador_sem.usar_variable(p[3], linea)
-                if variable and variable.tipo != 'Cad':
-                    error = ErrorSemantico(
-                        linea=linea,
-                        tipo="PARAMETRO_TIPO_INCORRECTO",
-                        descripcion=f"La función 'impcad' requiere parámetro de tipo 'Cad'",
-                        contexto=f"Se pasó variable '{p[3]}' de tipo '{variable.tipo}' a función 'impcad'",
-                        sugerencia="Use una variable de tipo 'Cad' o una cadena literal"
-                    )
-                    errores_semanticos.append(error)
-        else:
-            error = ErrorSemantico(
-                linea=linea,
-                tipo="PARAMETRO_FALTANTE",
-                descripcion="La función 'impcad' requiere un parámetro",
-                contexto="Llamada a 'impcad' sin parámetro",
-                sugerencia="Proporcione una cadena literal o variable de tipo 'Cad'"
-            )
-            errores_semanticos.append(error)
+        elif p[1] == 'impcad':
+            if p[3] is not None:
+                if not (isinstance(p[3], str) and p[3].startswith('"') and p[3].endswith('"')):
+                    variable = analizador_sem.usar_variable(p[3], linea)
+                    if variable and variable.tipo != 'Cad':
+                        error = ErrorSemantico(
+                            linea=linea,
+                            tipo="PARAMETRO_TIPO_INCORRECTO",
+                            descripcion=f"La función 'impcad' requiere parámetro de tipo 'Cad'",
+                            contexto=f"Se pasó variable '{p[3]}' de tipo '{variable.tipo}' a función 'impcad'",
+                            sugerencia="Use una variable de tipo 'Cad' o una cadena literal"
+                        )
+                        errores_semanticos.append(error)
+            else:
+                error = ErrorSemantico(
+                    linea=linea,
+                    tipo="PARAMETRO_FALTANTE",
+                    descripcion="La función 'impcad' requiere un parámetro",
+                    contexto="Llamada a 'impcad' sin parámetro",
+                    sugerencia="Proporcione una cadena literal o variable de tipo 'Cad'"
+                )
+                errores_semanticos.append(error)
             
     elif p[1] == 'leerdig':
         agregar_simbolo('leerdig', 'LEERDIG', 'Función leer dígito')
@@ -736,7 +764,7 @@ def generar_codigo_intermedio_formateado():
     if not cuadruplos_globales:
         return "No se generó código intermedio.\n"
     
-    resultado = "╔═══════════════════════════════════════════════════════════╗\n"
+    resultado =  "╔═══════════════════════════════════════════════════════════╗\n"
     resultado += "║          CÓDIGO INTERMEDIO DE TRES DIRECCIONES           ║\n"
     resultado += "╚═══════════════════════════════════════════════════════════╝\n\n"
     
@@ -753,6 +781,8 @@ def generar_codigo_intermedio_formateado():
             else:  # Operación binaria
                 linea_codigo = f"{linea_num}: {res} = {arg1} {op} {arg2}"
         elif op == 'impcad':
+            linea_codigo = f"{linea_num}: print({arg1})"
+        elif op == 'impdig':
             linea_codigo = f"{linea_num}: print({arg1})"
         elif op == 'leerdig':
             linea_codigo = f"{linea_num}: read({res})"
@@ -901,12 +931,14 @@ def generar_codigo_fuente():
         elif op == 'impcad':
             resultado += f"PUSH {arg1}\n"
             resultado += f"CALL print_string\n"
+        elif op == 'impdig':
+            resultado += f"PUSH {arg1}\n"
+            resultado += f"CALL print_int\n"
         elif op == 'leerdig':
             resultado += f"CALL read_int\n"
             resultado += f"MOV {res}, EAX\n"
         resultado += "\n"
     return resultado
-
 # ================= INTERFAZ GRÁFICA MEJORADA =================
 class AnalizadorGUI:
     def __init__(self, root):
